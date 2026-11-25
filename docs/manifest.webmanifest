@@ -1,0 +1,17 @@
+{
+  "id": "./index.html",
+  "name": "UNIT Spider · Control BLE",
+  "short_name": "Spider BLE",
+  "description": "Control local de la araña robótica ESP32-C6 por Bluetooth Low Energy.",
+  "lang": "es",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f1f4f2",
+  "theme_color": "#101b28",
+  "icons": [
+    { "src": "./icons/spider-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "./icons/spider-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" },
+    { "src": "./icons/spider.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#101b28">
+  <meta name="description" content="Control local por Bluetooth para la araña robótica ESP32-C6. Instalable y disponible sin conexión.">
+  <meta name="color-scheme" content="light">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icons/spider.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="./icons/spider-192.png">
+  <link rel="stylesheet" href="./styles.css">
+  <script src="./app.js" defer></script>
+  <title>Spider BLE · Control del robot</title>
+</head>
+<body>
+  <a class="skip-link" href="#controls">Ir a controles</a>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark" aria-hidden="true">✳</span><span>UNIT <b>SPIDER</b><small>CONTROL BLE</small></span></div>
+    <span class="offline-pill" id="network-state">Disponible sin conexión</span>
+  </header>
+
+  <main id="controls">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <p class="eyebrow">ESP32-C6 · 8 SERVOS · BLUETOOTH LE</p>
+        <h1 id="hero-title">Tu araña, en tus manos.</h1>
+        <p class="hero-description">Conecta directamente al robot, ajusta cada pata y controla sus movimientos desde el móvil.</p>
+        <div class="connection-row">
+          <span id="connection-dot" class="connection-dot" aria-hidden="true"></span>
+          <strong id="connection-label">Sin conectar</strong>
+          <span class="divider" aria-hidden="true"></span>
+          <span id="hardware-label">Hardware sin consultar</span>
+        </div>
+        <div class="hero-actions">
+          <button class="button button-primary" id="connect-button" type="button">Conectar robot</button>
+          <button class="button button-outline" id="disconnect-button" type="button" disabled>Desconectar</button>
+        </div>
+        <p id="connection-help" class="help-text">Usa Chrome o Edge en Android o escritorio, con Bluetooth activo y una página HTTPS.</p>
+      </div>
+      <div class="hero-graphic" aria-hidden="true">
+        <div class="graphic-ring ring-one"></div><div class="graphic-ring ring-two"></div>
+        <svg viewBox="0 0 360 320" role="presentation">
+          <g class="leg-lines" fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M155 123 99 86 42 103 M150 143 82 143 24 164 M151 175 93 205 39 247 M162 199 124 247 96 284"/>
+            <path d="M205 123 261 86 318 103 M210 143 278 143 336 164 M209 175 267 205 321 247 M198 199 236 247 264 284"/>
+          </g>
+          <g fill="currentColor"><circle cx="98" cy="86" r="10"/><circle cx="263" cy="86" r="10"/><circle cx="82" cy="143" r="10"/><circle cx="278" cy="143" r="10"/><circle cx="93" cy="205" r="10"/><circle cx="267" cy="205" r="10"/></g>
+          <path d="M180 81c-35 0-60 24-60 58 0 27 15 40 23 48-1 35 14 66 37 66s38-31 37-66c8-8 23-21 23-48 0-34-25-58-60-58Z" fill="#d9ed9c"/>
+          <ellipse cx="180" cy="161" rx="37" ry="50" fill="#101b28"/><circle cx="165" cy="151" r="6" fill="#d9ed9c"/><circle cx="195" cy="151" r="6" fill="#d9ed9c"/>
+          <path d="M165 185c8 8 22 8 30 0" fill="none" stroke="#d9ed9c" stroke-width="4" stroke-linecap="round"/>
+        </svg>
+        <span class="graphic-caption">SPIDER / LIVE CONTROL</span>
+      </div>
+    </section>
+
+    <div id="notice" class="notice" role="status" aria-live="polite">Conecta el robot para activar los controles.</div>
+
+    <section class="panel safety-panel" aria-labelledby="safety-title">
+      <div><p class="section-kicker">CONTROL INMEDIATO</p><h2 id="safety-title">Movimiento seguro</h2><p>Detén la trayectoria actual o libera los pulsos de los servos. Al desconectarse BLE, el firmware detiene el movimiento.</p></div>
+      <div class="safety-actions">
+        <button id="stop-button" class="button button-stop" type="button" disabled>■ Detener</button>
+        <button id="release-button" class="button button-secondary" type="button" disabled>Liberar servos</button>
+        <button id="arm-button" class="button button-secondary" type="button" disabled>Habilitar servos</button>
+      </div>
+    </section>
+
+    <div class="workspace-grid">
+      <section class="panel" aria-labelledby="legs-title">
+        <div class="section-heading"><div><p class="section-kicker">MOVIMIENTO</p><h2 id="legs-title">Control de patas</h2></div><span class="section-tag">8 CANALES</span></div>
+        <p class="section-intro">Ajusta el ángulo y pulsa <b>Mover</b>. El servo arranca desde una referencia lógica de 90°; verifica la posición física antes del primer movimiento.</p>
+        <div class="leg-key"><span><i class="key-dot key-right"></i>Derecha · R1–R4</span><span><i class="key-dot key-left"></i>Izquierda · L1–L4</span></div>
+        <div id="servo-grid" class="servo-grid"></div>
+      </section>
+
+      <aside class="side-column">
+        <section class="panel quick-panel" aria-labelledby="quick-title">
+          <p class="section-kicker">ACCIONES RÁPIDAS</p><h2 id="quick-title">Mover en conjunto</h2>
+          <p class="section-intro">Usa solo posturas previamente calibradas para tu robot.</p>
+          <div class="range-head"><label for="all-angle">Ángulo de todos</label><output id="all-angle-value" for="all-angle">90°</output></div>
+          <input id="all-angle" class="range" type="range" min="0" max="160" value="90" step="1">
+          <button id="all-button" class="button button-dark full" type="button" disabled>Mover los 8 servos</button>
+          <div class="mirror-block">
+            <label for="mirror-pair">Par en espejo</label>
+            <div class="inline-fields"><select id="mirror-pair"><option value="1">R1 + L1</option><option value="2">R2 + L2</option><option value="3">R3 + L3</option><option value="4">R4 + L4</option></select><input id="mirror-angle" type="number" min="0" max="160" value="90" inputmode="numeric" aria-label="Ángulo del par"></div>
+            <button id="mirror-button" class="button button-secondary full" type="button" disabled>Mover par</button>
+          </div>
+        </section>
+
+        <section class="panel expression-panel" aria-labelledby="eyes-title">
+          <p class="section-kicker">PANTALLA OLED</p><h2 id="eyes-title">Expresión</h2>
+          <div class="face-preview" aria-hidden="true"><span class="eye"></span><span class="eye"></span></div>
+          <div class="face-buttons">
+            <button type="button" data-face="NORMAL" disabled>Normal</button>
+            <button type="button" data-face="HAPPY" disabled>Feliz</button>
+            <button type="button" data-face="SAD" disabled>Triste</button>
+            <button type="button" data-face="SURPRISED" disabled>Sorpresa</button>
+          </div>
+        </section>
+
+        <section class="panel app-panel" aria-labelledby="app-title">
+          <p class="section-kicker">PWA · SIN CONEXIÓN A INTERNET</p><h2 id="app-title">Llévala contigo</h2>
+          <p>Instala la aplicación en tu móvil. La interfaz queda guardada y puedes abrirla sin datos; Bluetooth sigue requiriendo un navegador compatible.</p>
+          <button id="install-button" class="button button-secondary full" type="button" hidden>Instalar aplicación</button>
+          <p id="install-help" class="small-note">En Android Chrome: menú ⋮ → Añadir a pantalla de inicio.</p>
+        </section>
+      </aside>
+    </div>
+  </main>
+
+  <footer><span>UNIT SPIDER · BLE CONTROL</span><span>Sin nube · Control local</span></footer>
+</body>
+</html>
