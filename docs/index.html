@@ -10,6 +10,7 @@
   <link rel="icon" href="./icons/spider.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./icons/spider-192.png">
   <link rel="stylesheet" href="./styles.css">
+  <script src="./robot-profile.js" defer></script>
   <script src="./sesame-moves.js" defer></script>
   <script src="./app.js" defer></script>
   <title>Spider BLE · Control del robot</title>
@@ -77,9 +78,10 @@
       <aside class="side-column">
         <section class="panel quick-panel" aria-labelledby="quick-title">
           <p class="section-kicker">ACCIONES RÁPIDAS</p><h2 id="quick-title">Mover en conjunto</h2>
-          <p class="section-intro">Usa solo posturas previamente calibradas para tu robot.</p>
+          <p class="section-intro">Usa solo posturas previamente calibradas. Los ángulos respetan el rango del perfil.</p>
           <div class="range-head"><label for="all-angle">Ángulo de todos</label><output id="all-angle-value" for="all-angle">90°</output></div>
           <input id="all-angle" class="range" type="range" min="0" max="160" value="90" step="1">
+          <p id="all-range" class="small-note"></p>
           <button id="all-button" class="button button-dark full" type="button" disabled>Mover los 8 servos</button>
           <div class="mirror-block">
             <label for="mirror-pair">Par en espejo</label>
@@ -90,13 +92,9 @@
 
         <section class="panel expression-panel" aria-labelledby="eyes-title">
           <p class="section-kicker">PANTALLA OLED</p><h2 id="eyes-title">Expresión</h2>
+          <p class="section-intro">Las caras se definen en la página y se envían con <code>FACE</code>.</p>
           <div class="face-preview" aria-hidden="true"><span class="eye"></span><span class="eye"></span></div>
-          <div class="face-buttons">
-            <button type="button" data-face="NORMAL" disabled>Normal</button>
-            <button type="button" data-face="HAPPY" disabled>Feliz</button>
-            <button type="button" data-face="SAD" disabled>Triste</button>
-            <button type="button" data-face="SURPRISED" disabled>Sorpresa</button>
-          </div>
+          <div id="face-buttons" class="face-buttons"></div>
         </section>
 
         <section class="panel app-panel" aria-labelledby="app-title">
@@ -108,9 +106,25 @@
       </aside>
     </div>
 
+
+    <section class="panel profile-panel" aria-labelledby="profile-title">
+      <div class="section-heading"><div><p class="section-kicker">CONFIGURACIÓN</p><h2 id="profile-title">Perfil del robot</h2></div><span class="section-tag">DESDE LA PÁGINA</span></div>
+      <p class="section-intro">La página define el robot: rango, inversión, velocidad y sentido de cada motor. Al conectar, si los ocho motores están libres, se envían al ESP32 (<code>LIMIT</code>, <code>INVERT</code>, <code>SPEED</code>). Rango e inversión liberan el PWM del firmware, así que con motores sujetos se pide confirmación.</p>
+      <div class="table-wrap">
+        <table class="profile-table">
+          <thead><tr><th scope="col">Motor</th><th scope="col">Mín.</th><th scope="col">Máx.</th><th scope="col">°/s</th><th scope="col">Invertido</th><th scope="col">Sentido</th></tr></thead>
+          <tbody id="profile-rows"></tbody>
+        </table>
+      </div>
+      <div class="profile-actions">
+        <button id="profile-save" class="button button-dark" type="button">Guardar perfil</button>
+        <button id="profile-send" class="button button-secondary" type="button" disabled>Enviar perfil al robot</button>
+        <button id="profile-reset" class="button button-secondary" type="button">Valores de fábrica</button>
+      </div>
+    </section>
     <section class="panel sesame-panel" aria-labelledby="sesame-title">
       <div class="section-heading"><div><p class="section-kicker">COREOGRAFÍAS</p><h2 id="sesame-title">Movimientos Sesame</h2></div><span class="section-tag">19 MOVIMIENTOS</span></div>
-      <p class="section-intro">Secuencias del robot abierto <a href="https://github.com/dorianborian/sesame-robot" target="_blank" rel="noopener">Sesame</a> (Dorian Todd, Apache-2.0). No se copian sus ángulos: cada cuadro se convierte en cuánto avanza la cadera y cuánto se levanta el pie respecto a tu postura de apoyo. Empieza con poca amplitud y sujeta al robot la primera vez.</p>
+      <p class="section-intro">Secuencias del robot abierto <a href="https://github.com/dorianborian/sesame-robot" target="_blank" rel="noopener">Sesame</a> (Dorian Todd, Apache-2.0). No se copian sus ángulos: cada cuadro se convierte en cuánto avanza la cadera y cuánto se levanta el pie respecto a tu postura de apoyo. Los ángulos se limitan al rango de cada motor y el sentido de avance sale del perfil. Empieza con poca amplitud y sujeta al robot la primera vez.</p>
       <div class="sesame-grid">
         <div class="sesame-setup">
           <h3>1 · Postura de apoyo</h3>
@@ -124,11 +138,6 @@
           <input id="sesame-tempo" class="range" type="range" min="50" max="150" step="10" value="100">
           <div class="range-head"><label for="sesame-speed">Velocidad de servos</label><output id="sesame-speed-value" for="sesame-speed">150°/s</output></div>
           <input id="sesame-speed" class="range" type="range" min="40" max="180" step="10" value="150">
-          <details class="sesame-invert-box">
-            <summary>Invertir sentido de un motor</summary>
-            <p class="small-note">Por defecto R1 y R2 avanzan al subir grados, L1 y L2 al bajar, y R3–L4 levantan el pie al subir. Marca un motor si en tu robot va al revés.</p>
-            <div id="sesame-invert" class="sesame-invert"></div>
-          </details>
         </div>
         <div>
           <h3>3 · Poses y gestos</h3>
