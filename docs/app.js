@@ -13,6 +13,8 @@ let pendingWrite = Promise.resolve();
 let pcaReady = false;
 let deferredInstall = null;
 const cards = new Map();
+let routineToken = 0;
+let routineRunning = false;
 
 function setNotice(message, error = false) {
   $("notice").textContent = message;
@@ -31,10 +33,12 @@ function updateControls() {
   $("stop-button").disabled = !connected;
   $("release-button").disabled = !connected;
   $("arm-button").disabled = !connected;
-  $("all-button").disabled = !canMove;
-  $("mirror-button").disabled = !canMove;
   document.querySelectorAll("[data-face]").forEach((button) => { button.disabled = !connected; });
-  for (const card of cards.values()) card.button.disabled = !canMove;
+  for (const card of cards.values()) card.button.disabled = !canMove || routineRunning;
+  $("all-button").disabled = !canMove || routineRunning;
+  $("mirror-button").disabled = !canMove || routineRunning;
+  document.querySelectorAll("[data-move]").forEach((button) => { button.disabled = !canMove || routineRunning; });
+  $("support-save").disabled = !connected || routineRunning;
   $("connection-dot").classList.toggle("connected", connected);
   $("connection-label").textContent = connected ? (device.name || "Spider-BLE") + " conectado" : "Sin conectar";
   if (!connected) $("hardware-label").textContent = "Hardware sin consultar";
@@ -68,7 +72,7 @@ function renderServos() {
       }
     });
     grid.append(card);
-    cards.set(name, { slider, output, button, state, current, target, get edited() { return edited; } });
+    cards.set(name, { slider, output, button, state, current, target, max, targetValue: null, ready: false, get edited() { return edited; } });
   }
 }
 
@@ -91,6 +95,8 @@ function handleStatus(event) {
     card.target.textContent = Number.isFinite(target) ? `${target}°` : "—";
     card.state.textContent = !enabled ? "Deshabilitado" : pwm ? "PWM activo" : "Libre";
     card.state.className = `servo-state ${pwm ? "active" : "free"}`;
+    card.ready = enabled && pwm;
+    card.targetValue = Number.isFinite(target) ? target : null;
     if (!card.edited && Number.isFinite(target)) {
       card.slider.value = String(target);
       card.output.value = `${card.slider.value}°`;
@@ -99,6 +105,8 @@ function handleStatus(event) {
 }
 
 function disconnected() {
+  cancelRoutine();
+  for (const card of cards.values()) card.ready = false;
   commandCharacteristic = null;
   statusCharacteristic = null;
   pcaReady = false;
@@ -177,9 +185,11 @@ function setupActions() {
     if (device?.gatt?.connected) device.gatt.disconnect();
   });
   $("stop-button").addEventListener("click", async () => {
+    cancelRoutine();
     if (await sendCommand("STOP")) setNotice("Movimiento detenido. Los servos conservan su posición actual.");
   });
   $("release-button").addEventListener("click", async () => {
+    cancelRoutine();
     if (await sendCommand("RELEASE")) setNotice("Servos liberados. Pulsa Habilitar antes de moverlos de nuevo.");
   });
   $("arm-button").addEventListener("click", async () => {
@@ -211,6 +221,163 @@ function setupActions() {
       if (await sendCommand(`EYES ${button.dataset.face}`)) setNotice(`Expresión ${button.textContent} aplicada.`);
     });
   });
+}
+
+// ==========================================
+// MOVIMIENTOS SESAME
+// ==========================================
+const STORAGE_SUPPORT = "spider-ble-support-pose";
+const STORAGE_INVERT = "spider-ble-sesame-invert";
+// Sentido por defecto de esta araña: + avanza la cadera o levanta el pie.
+const DEFAULT_DIRECTION = { R1: 1, R2: 1, L1: -1, L2: -1, R3: 1, R4: 1, L3: 1, L4: 1 };
+const DEFAULT_SPEED = 60;
+
+function loadJson(key, fallback) {
+  try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; }
+}
+
+let supportPose = loadJson(STORAGE_SUPPORT, null);
+const invertDirection = loadJson(STORAGE_INVERT, {});
+
+function direction(name) {
+  return DEFAULT_DIRECTION[name] * (invertDirection[name] ? -1 : 1);
+}
+
+function renderSupportPose() {
+  $("support-pose").textContent = supportPose
+    ? SERVOS.map((name) => `${name} ${supportPose[name]}°`).join(" · ")
+    : "Sin guardar. Coloca la araña de pie con los cuatro pies apoyados y pulsa Guardar.";
+}
+
+function cancelRoutine() {
+  routineToken += 1;
+}
+
+function sleepUnlessCancelled(ms, token) {
+  return new Promise((resolve) => {
+    const end = performance.now() + ms;
+    const tick = () => {
+      if (token !== routineToken) resolve(false);
+      else if (performance.now() >= end) resolve(true);
+      else setTimeout(tick, Math.min(40, end - performance.now()));
+    };
+    tick();
+  });
+}
+
+function routineReady() {
+  if (!canSendMovement()) return false;
+  if (routineRunning) { setNotice("Ya hay un movimiento en curso. Pulsa Detener para interrumpirlo.", true); return false; }
+  if (!supportPose) { setNotice("Guarda primero la postura de apoyo de tu araña.", true); return false; }
+  const loose = SERVOS.filter((name) => !cards.get(name).ready);
+  if (loose.length) {
+    setNotice(`Sujeta los ocho motores en la postura de apoyo antes de empezar. Sin PWM: ${loose.join(", ")}.`, true);
+    return false;
+  }
+  return true;
+}
+
+// Convierte un cuadro de Sesame en ángulos de esta araña.
+function applyFrame(pose, frame, amplitude) {
+  for (const [name, angle] of Object.entries(frame.set)) {
+    const value = supportPose[name] + direction(name) * sesameDelta(name, angle) * amplitude;
+    pose[name] = Math.round(Math.min(cards.get(name).max, Math.max(0, value)));
+  }
+}
+
+async function sendPose(pose, previous, baseWait, speed, token) {
+  if (!(await sendCommand(`POSE ${SERVOS.map((name) => pose[name]).join(" ")}`))) return false;
+  const travel = Math.max(...SERVOS.map((name) => Math.abs(pose[name] - previous[name])));
+  return sleepUnlessCancelled(Math.max(baseWait, (travel / speed) * 1000 + 40), token);
+}
+
+async function runFrames(title, face, intro, cycle, cycles, stay) {
+  if (!routineReady()) return;
+  const token = ++routineToken;
+  const amplitude = Number($("sesame-amplitude").value) / 100;
+  const tempo = Number($("sesame-tempo").value) / 100;
+  const speed = Number($("sesame-speed").value);
+  const frames = [...intro, ...Array.from({ length: cycles }, () => cycle).flat()];
+  routineRunning = true;
+  updateControls();
+  setNotice(`${title}: en curso…`);
+  let completed = false;
+  try {
+    for (const name of SERVOS) if (!(await sendCommand(`SPEED ${name} ${speed}`))) return;
+    await sendCommand(`EYES ${face}`);
+    const pose = { ...supportPose };
+    for (const frame of frames) {
+      if (token !== routineToken) return;
+      if (frame.face) await sendCommand(`EYES ${frame.face}`);
+      const previous = { ...pose };
+      applyFrame(pose, frame, amplitude);
+      if (!(await sendPose(pose, previous, frame.wait / tempo, speed, token))) return;
+    }
+    if (!stay) {
+      if (!(await sendPose({ ...supportPose }, pose, 200, speed, token))) return;
+      await sendCommand("EYES NORMAL");
+    }
+    completed = true;
+  } finally {
+    routineRunning = false;
+    if (isConnected()) for (const name of SERVOS) await sendCommand(`SPEED ${name} ${DEFAULT_SPEED}`);
+    updateControls();
+    setNotice(completed ? `${title}: terminado.` : `${title}: interrumpido.`, !completed && token === routineToken);
+  }
+}
+
+function setupSesame() {
+  const moves = $("sesame-moves");
+  for (const move of SESAME_MOVES) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.move = move.id;
+    button.textContent = move.label;
+    button.addEventListener("click", () => runFrames(move.label, move.face, move.frames, [], 0, move.stay));
+    moves.append(button);
+  }
+  const gaits = $("sesame-gaits");
+  for (const gait of SESAME_GAITS) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.move = gait.id;
+    button.textContent = gait.label;
+    button.addEventListener("click", () => {
+      const cycles = Math.min(20, Math.max(1, Number($("sesame-cycles").value) || 1));
+      runFrames(gait.label, "NORMAL", gait.intro, gait.cycle, cycles, false);
+    });
+    gaits.append(button);
+  }
+  for (const id of ["sesame-amplitude", "sesame-tempo", "sesame-speed"]) {
+    const input = $(id);
+    const output = $(`${id}-value`);
+    const unit = id === "sesame-speed" ? "°/s" : "%";
+    const refresh = () => { output.value = `${input.value}${unit}`; };
+    input.addEventListener("input", refresh);
+    refresh();
+  }
+  const invertGrid = $("sesame-invert");
+  for (const name of SERVOS) {
+    const label = document.createElement("label");
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.checked = Boolean(invertDirection[name]);
+    box.addEventListener("change", () => {
+      invertDirection[name] = box.checked;
+      localStorage.setItem(STORAGE_INVERT, JSON.stringify(invertDirection));
+    });
+    label.append(box, ` ${name}`);
+    invertGrid.append(label);
+  }
+  $("support-save").addEventListener("click", () => {
+    const missing = SERVOS.filter((name) => cards.get(name).targetValue === null);
+    if (missing.length) { setNotice(`Aún no hay ángulo de ${missing.join(", ")}. Espera el estado del robot.`, true); return; }
+    supportPose = Object.fromEntries(SERVOS.map((name) => [name, cards.get(name).targetValue]));
+    localStorage.setItem(STORAGE_SUPPORT, JSON.stringify(supportPose));
+    renderSupportPose();
+    setNotice("Postura de apoyo guardada en este navegador.");
+  });
+  renderSupportPose();
 }
 
 function setupPwa() {
@@ -247,5 +414,6 @@ function setupPwa() {
 
 renderServos();
 setupActions();
+setupSesame();
 setupPwa();
 updateControls();

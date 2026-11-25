@@ -9,6 +9,7 @@ unit_robot_interactive_bl/
 ├── docs/
 │   ├── index.html              # entrada del sitio estático
 │   ├── app.js                  # Web Bluetooth y controles
+│   ├── sesame-moves.js         # secuencias del robot Sesame (poses y marchas)
 │   ├── styles.css              # diseño adaptable
 │   ├── manifest.webmanifest    # instalación PWA
 │   ├── sw.js                   # caché para uso sin internet
@@ -50,6 +51,18 @@ Abre `http://localhost:8000` en Chrome o Edge. Para usarla desde otro dispositiv
 3. Elige **Spider-BLE** en el selector del navegador.
 4. Espera a que la web indique **PCA9685 listo** y mueve un servo con un ángulo seguro.
 5. Para instalarla, usa el botón **Instalar aplicación** si aparece o el menú del navegador **Añadir a pantalla de inicio**.
+
+## Movimientos Sesame
+
+El panel **Movimientos Sesame** reproduce las 15 poses (saludar, bailar, nadar, señalar, flexiones, reverencia, tierno, raro, gusano, sacudir, encogerse, hacerse el muerto, cangrejo, de pie y descansar) y las 4 marchas (adelante, atrás y giros) del robot abierto [Sesame](https://github.com/dorianborian/sesame-robot) de Dorian Todd (Apache-2.0), tomadas de su `firmware/movement-sequences.h`.
+
+Sesame usa los mismos nombres de motor que esta araña (R1/R2/L1/L2 giran la cadera, R3/R4/L3/L4 levantan el pie, con los pares R1-R3, R2-R4, L1-L3 y L2-L4), pero sus ángulos son absolutos para su propia mecánica. Por eso `sesame-moves.js` guarda los ángulos originales y la web los convierte en desplazamientos: cuánto avanza cada cadera y cuánto se levanta cada pie respecto a la postura de pie de Sesame. Ese desplazamiento, multiplicado por la **Amplitud**, se suma a la **postura de apoyo** de tu araña y se limita al rango de cada servo. Cada cuadro se envía como un comando `POSE`; no hace falta reprogramar el ESP32.
+
+1. Coloca la araña de pie con los ocho motores sujetos (PWM activo) y pulsa **Guardar postura actual como apoyo**. Queda guardada en el navegador.
+2. Empieza con una amplitud del 30–40 % y sujeta al robot la primera vez.
+3. Si un motor se mueve al revés, márcalo en **Invertir sentido de un motor**. Sentidos por defecto: R1 y R2 avanzan al subir grados, L1 y L2 al bajar, y R3–L4 levantan el pie al subir.
+
+Durante la secuencia la web fija `SPEED` de los ocho servos al valor de **Velocidad de servos** y, al terminar o interrumpirse, lo devuelve a 60 °/s. Las expresiones de Sesame se aproximan con las de `EYES`. **Detener** o una desconexión interrumpen la secuencia.
 
 ## Protocolo BLE
 

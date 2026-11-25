@@ -10,6 +10,7 @@
   <link rel="icon" href="./icons/spider.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./icons/spider-192.png">
   <link rel="stylesheet" href="./styles.css">
+  <script src="./sesame-moves.js" defer></script>
   <script src="./app.js" defer></script>
   <title>Spider BLE · Control del robot</title>
 </head>
@@ -106,6 +107,39 @@
         </section>
       </aside>
     </div>
+
+    <section class="panel sesame-panel" aria-labelledby="sesame-title">
+      <div class="section-heading"><div><p class="section-kicker">COREOGRAFÍAS</p><h2 id="sesame-title">Movimientos Sesame</h2></div><span class="section-tag">19 MOVIMIENTOS</span></div>
+      <p class="section-intro">Secuencias del robot abierto <a href="https://github.com/dorianborian/sesame-robot" target="_blank" rel="noopener">Sesame</a> (Dorian Todd, Apache-2.0). No se copian sus ángulos: cada cuadro se convierte en cuánto avanza la cadera y cuánto se levanta el pie respecto a tu postura de apoyo. Empieza con poca amplitud y sujeta al robot la primera vez.</p>
+      <div class="sesame-grid">
+        <div class="sesame-setup">
+          <h3>1 · Postura de apoyo</h3>
+          <p class="small-note">Mueve los ocho motores hasta que la araña esté de pie, con PWM activo, y guárdala. Se guarda en este navegador.</p>
+          <p id="support-pose" class="support-pose"></p>
+          <button id="support-save" class="button button-secondary full" type="button" disabled>Guardar postura actual como apoyo</button>
+          <h3>2 · Ajustes</h3>
+          <div class="range-head"><label for="sesame-amplitude">Amplitud</label><output id="sesame-amplitude-value" for="sesame-amplitude">40%</output></div>
+          <input id="sesame-amplitude" class="range" type="range" min="10" max="100" step="5" value="40">
+          <div class="range-head"><label for="sesame-tempo">Ritmo</label><output id="sesame-tempo-value" for="sesame-tempo">100%</output></div>
+          <input id="sesame-tempo" class="range" type="range" min="50" max="150" step="10" value="100">
+          <div class="range-head"><label for="sesame-speed">Velocidad de servos</label><output id="sesame-speed-value" for="sesame-speed">150°/s</output></div>
+          <input id="sesame-speed" class="range" type="range" min="40" max="180" step="10" value="150">
+          <details class="sesame-invert-box">
+            <summary>Invertir sentido de un motor</summary>
+            <p class="small-note">Por defecto R1 y R2 avanzan al subir grados, L1 y L2 al bajar, y R3–L4 levantan el pie al subir. Marca un motor si en tu robot va al revés.</p>
+            <div id="sesame-invert" class="sesame-invert"></div>
+          </details>
+        </div>
+        <div>
+          <h3>3 · Poses y gestos</h3>
+          <div id="sesame-moves" class="face-buttons sesame-buttons"></div>
+          <h3>4 · Caminar y girar</h3>
+          <div class="inline-fields"><label for="sesame-cycles" class="cycles-label">Ciclos</label><input id="sesame-cycles" type="number" min="1" max="20" value="3" inputmode="numeric"></div>
+          <div id="sesame-gaits" class="face-buttons sesame-buttons sesame-gait-buttons"></div>
+          <p class="small-note">Al terminar, la araña vuelve a la postura de apoyo (salvo De pie, Descansar y Hacerse el muerto). <b>Detener</b> interrumpe cualquier secuencia.</p>
+        </div>
+      </div>
+    </section>
   </main>
 
   <footer><span>UNIT SPIDER · BLE CONTROL</span><span>Sin nube · Control local</span></footer>
