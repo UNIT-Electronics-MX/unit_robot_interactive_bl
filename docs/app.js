@@ -785,15 +785,45 @@ function renderSequence() {
 // ==========================================
 // RUTINAS
 // ==========================================
+async function runSavedRoutine(name, feedback, needsStance) {
+  feedback.textContent = "Iniciando rutina…";
+  feedback.classList.remove("error-text");
+  try {
+    const result = await runRoutine(name);
+    reportRun(result, `Rutina «${name}»`);
+    feedback.textContent = result.status === "done" ? "Rutina terminada."
+      : result.status === "stopped" ? "Rutina detenida."
+      : result.error || "No se pudo completar la rutina.";
+    feedback.classList.toggle("error-text", result.status === "error");
+  } catch (error) {
+    const detail = error.message || String(error);
+    const message = needsStance ? `${detail} Revisa «Mover patas → Postura de apoyo».` : detail;
+    feedback.textContent = message;
+    feedback.classList.add("error-text");
+    setNotice(message, true);
+  } finally {
+    updateControls();
+  }
+}
+
 function renderRoutinesList() {
-  const make = (name, routine, demo) => el("div", { className: "item" }, [
-    el("div", {}, [el("strong", { textContent: name }), el("span", { className: "small-note", textContent: ` ${routine.steps.length} pasos${routine.description ? ` · ${routine.description}` : ""}` })]),
-    el("span", { className: "item-tools" }, [
-      button("▶", () => runAction(`Rutina «${name}»`, () => runRoutine(name)), { small: true, needs: "move" }),
-      demo ? null : button("Editar", () => editRoutine(name), { small: true }),
-      demo ? null : button("Borrar", () => { if (window.confirm(`¿Borrar la rutina «${name}»?`)) act(() => deleteRoutine(name), `Rutina «${name}» borrada.`); }, { small: true })
-    ])
-  ]);
+  const make = (name, routine, demo) => {
+    const needsStance = routine.steps.some((step) => "stance_offset" in step);
+    const feedback = el("p", { className: "small-note routine-feedback", role: "status",
+      textContent: needsStance ? "Requiere postura de apoyo guardada, recuperada y los ocho servos sujetos («Mover patas»)." : "" });
+    return el("div", { className: "item" }, [
+      el("div", { className: "routine-details" }, [
+        el("strong", { textContent: name }),
+        el("span", { className: "small-note", textContent: ` ${routine.steps.length} pasos${routine.description ? ` · ${routine.description}` : ""}` }),
+        feedback
+      ]),
+      el("span", { className: "item-tools" }, [
+        button("▶", () => runSavedRoutine(name, feedback, needsStance), { small: true, needs: "move" }),
+        demo ? null : button("Editar", () => editRoutine(name), { small: true }),
+        demo ? null : button("Borrar", () => { if (window.confirm(`¿Borrar la rutina «${name}»?`)) act(() => deleteRoutine(name), `Rutina «${name}» borrada.`); }, { small: true })
+      ])
+    ]);
+  };
   const entries = Object.entries(robot.routines);
   $("routines-list").replaceChildren(...entries.map(([name, routine]) => make(name, routine, false)));
   $("demo-routines").replaceChildren(...entries.map(([name, routine]) => make(name, routine, true)));

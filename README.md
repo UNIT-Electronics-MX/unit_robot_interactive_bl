@@ -58,6 +58,8 @@ Abre `http://localhost:8000` en Chrome o Edge. Para usarla desde otro dispositiv
 
 La PWA reproduce, sin servidor, las funciones del panel general (`app/` + `server/main.py`). Todo lo que describe al robot vive en la página y se guarda en el navegador: el perfil y las posturas por robot BLE, y las caras, rutinas y programas compartidos entre robots. El firmware solo ejecuta órdenes. `robot-core.js` traduce la lógica de `server/main.py`; `robot-profile.js` contiene los valores por defecto de `firmware/arana_api`, `server/faces.json` y `server/routines.json`.
 
+Las cuatro rutinas pregrabadas de patas usan `stance_offset`: sus grados se suman a la **postura de apoyo de ese robot**. Antes de ejecutarlas, coloca manualmente los ocho servos en una posición estable, con los cuatro pies apoyados, espera a que terminen y pulsa **Mover patas → Guardar postura y activar auto**. Si cambiaste la posición, pulsa **Recuperar postura guardada** y espera a que termine. Sin esta calibración, la página bloquea la rutina antes de enviar comandos BLE; mover servos individuales sigue funcionando. `saludo_ojos` solo cambia la OLED y no mueve motores.
+
 | Pestaña | Qué hace | Equivale a |
 | --- | --- | --- |
 | Demostración | Caras de un toque, programas y rutinas guardados con su botón de ejecutar | Demostración |
