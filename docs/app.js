@@ -1142,15 +1142,15 @@ async function playSesame(label, fn, feedback) {
 }
 
 const CHOREO_ICONS = {
-  stand: "🧍", rest: "😴", wave: "👋", dance: "💃", swim: "🏊", point: "👉", pushup: "💪", bow: "🙇",
-  cute: "🥰", freaky: "🤪", worm: "🐛", shake: "🫨", shrug: "🤷", dead: "💀", crab: "🦀",
-  forward: "⬆️", backward: "⬇️", left: "↺", right: "↻"
+  stand: "🦿", rest: "💤", wave: "👋", dance: "🎵", swim: "🌊", point: "📍", pushup: "💪", bow: "↘️",
+  cute: "🤍", freaky: "⚡", worm: "〰️", shake: "↔️", shrug: "❔", dead: "⏹️", crab: "⇄",
+  forward: "⬆️", backward: "⬇️", left: "↶", right: "↷"
 };
 
 // Botón grande de Demostración: icono + nombre; se resalta mientras su coreografía corre.
 function choreoButton(item, label, play) {
   const node = el("button", { type: "button", className: "choreo-card", dataset: { needs: "move", choreo: item.id } }, [
-    el("span", { className: "choreo-icon", "aria-hidden": "true", textContent: CHOREO_ICONS[item.id] || "✨" }),
+    el("span", { className: "choreo-icon", "aria-hidden": "true", textContent: CHOREO_ICONS[item.id] || "•" }),
     el("span", { className: "choreo-label", textContent: label })
   ]);
   node.addEventListener("click", () => play(item, $("demo-choreo-feedback")));

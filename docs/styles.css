@@ -403,7 +403,7 @@ footer { max-width: 1160px; border-color: #e1e2dd; font-weight: 550; letter-spac
 .connect-toggle .connection-dot { width: 8px; height: 8px; border-radius: 50%; background: #c9cfd1; }
 .connect-toggle.is-on { background: #fff; color: #344148; border-color: #d6dcd9; }
 .connect-toggle.is-on:hover:not(:disabled) { background: #f3f4f1; }
-.connect-toggle.is-on .connection-dot { background: #2f9e62; box-shadow: 0 0 0 3px #2f9e6226; }
+.connect-toggle.is-on .connection-dot { background: #b45c32; box-shadow: 0 0 0 3px #b45c3226; }
 #servo-toggle.is-on { background: #fdf3ec; color: #9b4a22; border-color: #efcdb7; }
 .topbar .tabs { position: static; margin: 0; padding: 0; background: transparent; border: 0; }
 .tab-list { display: flex; gap: 20px; overflow-x: auto; scrollbar-width: none; }
@@ -416,7 +416,7 @@ footer { max-width: 1160px; border-color: #e1e2dd; font-weight: 550; letter-spac
 .demo-hold-controls #demo-hold-all { min-height: 46px; font-size: .9rem; }
 .hold-meter { height: 6px; border-radius: 99px; background: #eceae5; overflow: hidden; }
 .hold-meter span { display: block; height: 100%; width: 0; border-radius: inherit; background: #b45c32; transition: width .3s; }
-.hold-meter span.full { background: #2f9e62; }
+.hold-meter span.full { background: #344956; }
 
 /* Coreografías */
 .choreo-panel { border-top: 3px solid #b45c32; }
@@ -430,7 +430,7 @@ footer { max-width: 1160px; border-color: #e1e2dd; font-weight: 550; letter-spac
   color: #2a363c; font: inherit; font-size: .82rem; font-weight: 600; text-align: center; cursor: pointer;
   transition: transform .15s, border-color .15s, box-shadow .15s, background .15s;
 }
-.choreo-icon { font-size: 1.7rem; line-height: 1; }
+.choreo-icon { font-size: 1.5rem; line-height: 1; filter: grayscale(1); opacity: .86; }
 .choreo-card:hover:not(:disabled) { transform: translateY(-2px); border-color: #d9a585; box-shadow: 0 6px 16px rgba(120, 70, 40, .12); }
 .choreo-card:active:not(:disabled) { transform: scale(.97); }
 .choreo-card:focus-visible { outline: 2px solid #b45c32; outline-offset: 2px; }
@@ -470,7 +470,7 @@ footer { max-width: 1160px; border-color: #e1e2dd; font-weight: 550; letter-spac
   .choreo-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
   .choreo-grid.gaits { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .choreo-card { min-height: 80px; font-size: .76rem; }
-  .choreo-icon { font-size: 1.5rem; }
+  .choreo-icon { font-size: 1.35rem; }
 }
 @media (max-width: 360px) {
   .choreo-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
