@@ -12,6 +12,7 @@
   <link rel="stylesheet" href="./styles.css">
   <script src="./robot-profile.js" defer></script>
   <script src="./sesame-moves.js" defer></script>
+  <script src="./robot-core.js" defer></script>
   <script src="./app.js" defer></script>
   <title>Spider BLE · Control del robot</title>
 </head>
@@ -59,7 +60,9 @@
     <div id="notice" class="notice" role="status" aria-live="polite">Conecta el robot para activar los controles.</div>
 
     <section class="panel safety-panel" aria-labelledby="safety-title">
-      <div><p class="section-kicker">CONTROL INMEDIATO</p><h2 id="safety-title">Movimiento seguro</h2><p>Detén la trayectoria actual o libera los pulsos de los servos. Al desconectarse BLE, el firmware detiene el movimiento.</p></div>
+      <div><p class="section-kicker">CONTROL INMEDIATO</p><h2 id="safety-title">Movimiento seguro</h2>
+        <p>Detener corta cualquier rutina o programa y mantiene la posición. Liberar apaga los pulsos. Al desconectarse BLE, el firmware detiene el movimiento.</p>
+        <p id="run-status" class="run-status">Sin rutinas en marcha.</p></div>
       <div class="safety-actions">
         <button id="stop-button" class="button button-stop" type="button" disabled>■ Detener</button>
         <button id="release-button" class="button button-secondary" type="button" disabled>Liberar servos</button>
@@ -67,87 +70,269 @@
       </div>
     </section>
 
-    <div class="workspace-grid">
-      <section class="panel" aria-labelledby="legs-title">
-        <div class="section-heading"><div><p class="section-kicker">MOVIMIENTO</p><h2 id="legs-title">Control de patas</h2></div><span class="section-tag">8 CANALES</span></div>
-        <p class="section-intro">Ajusta el ángulo y pulsa <b>Mover</b>. El servo arranca desde una referencia lógica de 90°; verifica la posición física antes del primer movimiento.</p>
-        <div class="leg-key"><span><i class="key-dot key-right"></i>Derecha · R1–R4</span><span><i class="key-dot key-left"></i>Izquierda · L1–L4</span></div>
-        <div id="servo-grid" class="servo-grid"></div>
-      </section>
+    <nav class="tabs" aria-label="Secciones">
+      <button type="button" data-tab="demo" class="active">Demostración</button>
+      <button type="button" data-tab="servos">Servomotores</button>
+      <button type="button" data-tab="legs">Mover patas</button>
+      <button type="button" data-tab="blocks">Bloques y rutinas</button>
+      <button type="button" data-tab="faces">Caritas</button>
+      <button type="button" data-tab="sesame">Sesame</button>
+      <button type="button" data-tab="log">Bitácora</button>
+    </nav>
 
-      <aside class="side-column">
-        <section class="panel quick-panel" aria-labelledby="quick-title">
-          <p class="section-kicker">ACCIONES RÁPIDAS</p><h2 id="quick-title">Mover en conjunto</h2>
-          <p class="section-intro">Usa solo posturas previamente calibradas. Los ángulos respetan el rango del perfil.</p>
-          <div class="range-head"><label for="all-angle">Ángulo de todos</label><output id="all-angle-value" for="all-angle">90°</output></div>
-          <input id="all-angle" class="range" type="range" min="0" max="160" value="90" step="1">
-          <p id="all-range" class="small-note"></p>
-          <button id="all-button" class="button button-dark full" type="button" disabled>Mover los 8 servos</button>
-          <div class="mirror-block">
-            <label for="mirror-pair">Par en espejo</label>
-            <div class="inline-fields"><select id="mirror-pair"><option value="1">R1 + L1</option><option value="2">R2 + L2</option><option value="3">R3 + L3</option><option value="4">R4 + L4</option></select><input id="mirror-angle" type="number" min="0" max="160" value="90" inputmode="numeric" aria-label="Ángulo del par"></div>
-            <button id="mirror-button" class="button button-secondary full" type="button" disabled>Mover par</button>
-          </div>
+    <!-- DEMOSTRACIÓN -->
+    <section id="tab-demo" class="tab-page">
+      <div class="two-col">
+        <section class="panel">
+          <p class="section-kicker">UN TOQUE</p><h2>Caras</h2>
+          <p class="section-intro">Las caras funcionan incluso mientras corre un programa.</p>
+          <div id="demo-faces" class="chip-grid"></div>
         </section>
-
-        <section class="panel expression-panel" aria-labelledby="eyes-title">
-          <p class="section-kicker">PANTALLA OLED</p><h2 id="eyes-title">Expresión</h2>
-          <p class="section-intro">Las caras se definen en la página y se envían con <code>FACE</code>.</p>
-          <div class="face-preview" aria-hidden="true"><span class="eye"></span><span class="eye"></span></div>
-          <div id="face-buttons" class="face-buttons"></div>
+        <section class="panel">
+          <p class="section-kicker">GUARDADOS</p><h2>Programas de bloques</h2>
+          <div id="demo-programs" class="item-list"></div>
+          <h3>Rutinas</h3>
+          <div id="demo-routines" class="item-list"></div>
         </section>
-
-        <section class="panel app-panel" aria-labelledby="app-title">
-          <p class="section-kicker">PWA · SIN CONEXIÓN A INTERNET</p><h2 id="app-title">Llévala contigo</h2>
-          <p>Instala la aplicación en tu móvil. La interfaz queda guardada y puedes abrirla sin datos; Bluetooth sigue requiriendo un navegador compatible.</p>
-          <button id="install-button" class="button button-secondary full" type="button" hidden>Instalar aplicación</button>
-          <p id="install-help" class="small-note">En Android Chrome: menú ⋮ → Añadir a pantalla de inicio.</p>
-        </section>
-      </aside>
-    </div>
-
-
-    <section class="panel profile-panel" aria-labelledby="profile-title">
-      <div class="section-heading"><div><p class="section-kicker">CONFIGURACIÓN</p><h2 id="profile-title">Perfil del robot</h2></div><span class="section-tag">DESDE LA PÁGINA</span></div>
-      <p class="section-intro">La página define el robot: rango, inversión, velocidad y sentido de cada motor. Al conectar, si los ocho motores están libres, se envían al ESP32 (<code>LIMIT</code>, <code>INVERT</code>, <code>SPEED</code>). Rango e inversión liberan el PWM del firmware, así que con motores sujetos se pide confirmación.</p>
-      <div class="table-wrap">
-        <table class="profile-table">
-          <thead><tr><th scope="col">Motor</th><th scope="col">Mín.</th><th scope="col">Máx.</th><th scope="col">°/s</th><th scope="col">Invertido</th><th scope="col">Sentido</th></tr></thead>
-          <tbody id="profile-rows"></tbody>
-        </table>
-      </div>
-      <div class="profile-actions">
-        <button id="profile-save" class="button button-dark" type="button">Guardar perfil</button>
-        <button id="profile-send" class="button button-secondary" type="button" disabled>Enviar perfil al robot</button>
-        <button id="profile-reset" class="button button-secondary" type="button">Valores de fábrica</button>
       </div>
     </section>
-    <section class="panel sesame-panel" aria-labelledby="sesame-title">
-      <div class="section-heading"><div><p class="section-kicker">COREOGRAFÍAS</p><h2 id="sesame-title">Movimientos Sesame</h2></div><span class="section-tag">19 MOVIMIENTOS</span></div>
-      <p class="section-intro">Secuencias del robot abierto <a href="https://github.com/dorianborian/sesame-robot" target="_blank" rel="noopener">Sesame</a> (Dorian Todd, Apache-2.0). No se copian sus ángulos: cada cuadro se convierte en cuánto avanza la cadera y cuánto se levanta el pie respecto a tu postura de apoyo. Los ángulos se limitan al rango de cada motor y el sentido de avance sale del perfil. Empieza con poca amplitud y sujeta al robot la primera vez.</p>
-      <div class="sesame-grid">
-        <div class="sesame-setup">
-          <h3>1 · Postura de apoyo</h3>
-          <p class="small-note">Mueve los ocho motores hasta que la araña esté de pie, con PWM activo, y guárdala. Se guarda en este navegador.</p>
-          <p id="support-pose" class="support-pose"></p>
-          <button id="support-save" class="button button-secondary full" type="button" disabled>Guardar postura actual como apoyo</button>
-          <h3>2 · Ajustes</h3>
-          <div class="range-head"><label for="sesame-amplitude">Amplitud</label><output id="sesame-amplitude-value" for="sesame-amplitude">40%</output></div>
-          <input id="sesame-amplitude" class="range" type="range" min="10" max="100" step="5" value="40">
-          <div class="range-head"><label for="sesame-tempo">Ritmo</label><output id="sesame-tempo-value" for="sesame-tempo">100%</output></div>
-          <input id="sesame-tempo" class="range" type="range" min="50" max="150" step="10" value="100">
-          <div class="range-head"><label for="sesame-speed">Velocidad de servos</label><output id="sesame-speed-value" for="sesame-speed">150°/s</output></div>
-          <input id="sesame-speed" class="range" type="range" min="40" max="180" step="10" value="150">
-        </div>
-        <div>
-          <h3>3 · Poses y gestos</h3>
-          <div id="sesame-moves" class="face-buttons sesame-buttons"></div>
-          <h3>4 · Caminar y girar</h3>
-          <div class="inline-fields"><label for="sesame-cycles" class="cycles-label">Ciclos</label><input id="sesame-cycles" type="number" min="1" max="20" value="3" inputmode="numeric"></div>
-          <div id="sesame-gaits" class="face-buttons sesame-buttons sesame-gait-buttons"></div>
-          <p class="small-note">Al terminar, la araña vuelve a la postura de apoyo (salvo De pie, Descansar y Hacerse el muerto). <b>Detener</b> interrumpe cualquier secuencia.</p>
-        </div>
+
+    <!-- SERVOMOTORES -->
+    <section id="tab-servos" class="tab-page" hidden>
+      <div class="workspace-grid">
+        <section class="panel">
+          <div class="section-heading"><div><p class="section-kicker">MOVIMIENTO</p><h2>Control de servos</h2></div><span class="section-tag">8 CANALES</span></div>
+          <p class="section-intro">Ajusta el ángulo y pulsa <b>Mover</b>. Tras reiniciar, el firmware informa 90° lógicos que no son una medida; verifica la posición física antes del primer movimiento.</p>
+          <div class="leg-key"><span><i class="key-dot key-right"></i>Derecha · R1–R4</span><span><i class="key-dot key-left"></i>Izquierda · L1–L4</span></div>
+          <div id="servo-grid" class="servo-grid"></div>
+        </section>
+        <aside class="side-column">
+          <section class="panel">
+            <p class="section-kicker">ACCIONES RÁPIDAS</p><h2>Mover en conjunto</h2>
+            <div class="range-head"><label for="all-angle">Ángulo de todos</label><output id="all-angle-value" for="all-angle">90°</output></div>
+            <input id="all-angle" class="range" type="range" min="0" max="160" value="90" step="1">
+            <p id="all-range" class="small-note"></p>
+            <div class="button-row"><button id="all-button" class="button button-dark" type="button" data-needs="move">Mover los 8</button>
+              <button id="center-button" class="button button-secondary" type="button" data-needs="move">Centrar (90°)</button></div>
+            <div class="mirror-block">
+              <label for="mirror-pair">Par en espejo</label>
+              <div class="inline-fields"><select id="mirror-pair"><option value="1">R1 + L1</option><option value="2">R2 + L2</option><option value="3">R3 + L3</option><option value="4">R4 + L4</option></select><input id="mirror-angle" type="number" value="90" inputmode="numeric" aria-label="Ángulo del par"></div>
+              <button id="mirror-button" class="button button-secondary full" type="button" data-needs="move">Mover par</button>
+            </div>
+          </section>
+          <section class="panel">
+            <p class="section-kicker">VELOCIDAD</p><h2>Velocidad general</h2>
+            <p class="section-intro">Indica cuántos segundos debe tardar un recorrido de 90°.</p>
+            <div class="inline-fields"><input id="speed-time" type="number" min="0.5" max="90" step="0.1" value="1.5" aria-label="Segundos para 90 grados"><span class="unit">s por 90°</span></div>
+            <p id="speed-time-info" class="small-note"></p>
+            <button id="speed-time-button" class="button button-secondary full" type="button" data-needs="conn">Aplicar a los 8</button>
+          </section>
+        </aside>
       </div>
+      <section class="panel">
+        <div class="section-heading"><div><p class="section-kicker">CONFIGURACIÓN</p><h2>Perfil del robot</h2></div><span class="section-tag">DESDE LA PÁGINA</span></div>
+        <p class="section-intro">La página define el robot: rango, inversión y velocidad de cada motor. Al conectar, si los ocho motores están libres, se envían al ESP32 (<code>LIMIT</code>, <code>INVERT</code>, <code>SPEED</code>) y se recupera la postura automática elegida en <b>Mover patas</b>. Rango e inversión liberan el PWM, así que con motores sujetos se pide confirmación.</p>
+        <div class="table-wrap"><table class="data-table"><thead><tr><th>Motor</th><th>Mín.</th><th>Máx.</th><th>°/s</th><th>Invertido</th><th>Límite físico</th></tr></thead><tbody id="profile-rows"></tbody></table></div>
+        <div class="button-row">
+          <button id="profile-save" class="button button-dark" type="button">Guardar perfil</button>
+          <button id="profile-send" class="button button-secondary" type="button" data-needs="conn">Enviar perfil al robot</button>
+          <button id="profile-reset" class="button button-secondary" type="button">Valores de fábrica</button>
+        </div>
+      </section>
+    </section>
+
+    <!-- MOVER PATAS -->
+    <section id="tab-legs" class="tab-page" hidden>
+      <section class="panel">
+        <div class="section-heading"><div><p class="section-kicker">VISTA DESDE ARRIBA · FRENTE ARRIBA</p><h2>Mover patas</h2></div>
+          <div class="inline-fields"><label for="jog-step" class="unit">Paso manual</label><input id="jog-step" type="number" min="1" max="180" value="5"><span class="unit">°</span></div></div>
+        <p class="section-intro">Adelante/Atrás mueven el motor de giro según su sentido de avance; Arriba/Abajo mueven el de elevación (subir grados levanta).</p>
+        <div id="leg-pad" class="leg-pad"></div>
+      </section>
+      <div class="two-col">
+        <section class="panel">
+          <p class="section-kicker">PASO 1</p><h2>Postura de apoyo</h2>
+          <p class="section-intro">Ejecuta tu rutina de pie, comprueba que los cuatro pies estén apoyados con los ocho motores sujetos y guárdala. Al guardarla se borran las elevaciones calibradas.</p>
+          <p id="stance-info" class="pose-box"></p>
+          <div class="button-row">
+            <button id="stance-save" class="button button-dark" type="button" data-needs="conn">Guardar postura y activar auto</button>
+            <button id="stance-restore" class="button button-secondary" type="button" data-needs="move">Recuperar postura guardada</button>
+          </div>
+          <label class="check"><input id="stance-auto" type="checkbox"> Recuperar automáticamente al conectar tras un reinicio</label>
+        </section>
+        <section class="panel">
+          <p class="section-kicker">PASO 2</p><h2>Recorrido de avance por motor</h2>
+          <p class="section-intro">Límites de la marcha para los motores de giro (no envían <code>LIMIT</code>). El sentido indica si subir o bajar grados avanza la pata; también lo usan Sesame y los bloques.</p>
+          <div class="table-wrap"><table class="data-table"><thead><tr><th>Motor</th><th>Mín.</th><th>Máx.</th><th>Avanza al</th><th>Queda</th></tr></thead><tbody id="swing-rows"></tbody></table></div>
+          <button id="swing-save" class="button button-dark" type="button">Guardar recorrido</button>
+        </section>
+      </div>
+      <div class="two-col">
+        <section class="panel">
+          <p class="section-kicker">PASO 3</p><h2>Elevación por pata</h2>
+          <p class="section-intro">Desde la postura de apoyo, <b>Probar</b> levanta solo esa pata y la devuelve. Si el pie se despega, marca <b>Sí se despegó</b>. Guarda las cuatro.</p>
+          <div id="lift-rows" class="lift-rows"></div>
+          <button id="lifts-save" class="button button-dark" type="button" data-needs="conn">Guardar elevaciones</button>
+          <p id="lifts-info" class="small-note"></p>
+        </section>
+        <section class="panel">
+          <p class="section-kicker">PASO 4</p><h2>Paso de caminata</h2>
+          <p class="section-intro">Levanta y adelanta una pata cada vez (R1, L2, R2, L1) con las otras tres apoyadas; luego gira las cuatro hacia atrás para empujar el cuerpo. Empieza con 3°–5°.</p>
+          <div class="inline-fields"><label for="walk-stride" class="unit">Avance</label><input id="walk-stride" type="number" min="1" max="180" value="4"><span class="unit">°</span></div>
+          <ul id="walk-checks" class="checklist"></ul>
+          <div class="button-row">
+            <button id="walk-one" class="button button-dark" type="button" data-needs="move">Un paso</button>
+            <button id="walk-three" class="button button-secondary" type="button" data-needs="move">Tres pasos</button>
+          </div>
+        </section>
+      </div>
+      <section class="panel">
+        <p class="section-kicker">ARRANQUE</p><h2>Postura acostada al iniciar</h2>
+        <p class="section-intro">En <b>Bloques</b>, crea o carga un programa que empiece con ocho bloques <b>Servo</b> (uno por motor) con los ángulos de acostado calibrados. Al guardarla se envía <code>POSE_HOLD</code>, que activa los pulsos directamente en esos ángulos sin pasar por los 90° lógicos. Excluye la recuperación automática de la postura de apoyo.</p>
+        <p id="startup-info" class="pose-box"></p>
+        <div class="button-row">
+          <button id="startup-save" class="button button-dark" type="button" data-needs="conn">Guardar y aplicar inicio acostado</button>
+          <button id="startup-restore" class="button button-secondary" type="button" data-needs="conn">Recuperar postura acostada</button>
+        </div>
+        <label class="check"><input id="startup-auto" type="checkbox"> Aplicar automáticamente al conectar tras un reinicio</label>
+      </section>
+    </section>
+
+    <!-- BLOQUES Y RUTINAS -->
+    <section id="tab-blocks" class="tab-page" hidden>
+      <section class="panel">
+        <div class="section-heading"><div><p class="section-kicker">PROGRAMACIÓN VISUAL</p><h2>Programa de bloques</h2></div><span id="blocks-count" class="section-tag"></span></div>
+        <div class="form-grid">
+          <label>Nombre<input id="program-name" type="text" maxlength="60" placeholder="mi_programa"></label>
+          <label>Descripción<input id="program-description" type="text" maxlength="200"></label>
+          <label>Ciclos<select id="program-cycles"><option>1</option><option>2</option><option>3</option></select></label>
+        </div>
+        <div class="palette" id="block-palette"></div>
+        <ol id="blocks-list" class="blocks-list"></ol>
+        <p id="blocks-error" class="small-note error-text"></p>
+        <div class="button-row">
+          <button id="program-run" class="button button-dark" type="button" data-needs="move">▶ Ejecutar</button>
+          <button id="program-save" class="button button-secondary" type="button">Guardar programa</button>
+          <button id="program-new" class="button button-secondary" type="button">Nuevo</button>
+          <button id="program-convert" class="button button-secondary" type="button" hidden>Convertir mis cuatro pasos en caminata</button>
+        </div>
+        <h3>Programas guardados</h3>
+        <div id="programs-list" class="item-list"></div>
+      </section>
+      <section class="panel">
+        <div class="section-heading"><div><p class="section-kicker">PRUEBA RÁPIDA</p><h2>Secuencia de pasos</h2></div><span id="seq-count" class="section-tag"></span></div>
+        <p class="section-intro">Los cambios son relativos a la postura actual. <b>Agregar movimiento</b> acumula sobre el paso anterior; <b>Paso simultáneo</b> sube, adelanta y baja las patas elegidas a la vez.</p>
+        <div class="form-grid">
+          <label>Pata<select id="seq-leg"></select></label>
+          <label>Dirección<select id="seq-direction"><option value="forward">Adelante</option><option value="back">Atrás</option><option value="up">Arriba</option><option value="down">Abajo</option></select></label>
+          <label>Grados<input id="seq-degrees" type="number" min="1" max="180" value="5"></label>
+          <label>Pausa (s)<input id="seq-pause" type="number" min="0" max="2" step="0.1" value="0"></label>
+        </div>
+        <button id="seq-add" class="button button-secondary" type="button">Agregar movimiento</button>
+        <div id="seq-legs" class="seq-legs"></div>
+        <button id="seq-step" class="button button-secondary" type="button">Paso simultáneo</button>
+        <ol id="seq-frames" class="frames-list"></ol>
+        <p id="seq-error" class="small-note error-text"></p>
+        <div class="form-grid">
+          <label>Ciclos<select id="seq-cycles"><option>1</option><option>2</option><option>3</option></select></label>
+          <label>Guardar como<input id="seq-name" type="text" maxlength="60" placeholder="mi_secuencia"></label>
+        </div>
+        <div class="button-row">
+          <button id="seq-test" class="button button-dark" type="button" data-needs="move">Probar</button>
+          <button id="seq-save" class="button button-secondary" type="button" data-needs="conn">Guardar como rutina</button>
+          <button id="seq-clear" class="button button-secondary" type="button">Vaciar</button>
+        </div>
+      </section>
+      <section class="panel">
+        <p class="section-kicker">JSON</p><h2>Rutinas guardadas</h2>
+        <div id="routines-list" class="item-list"></div>
+        <div class="form-grid"><label>Nombre<input id="routine-name" type="text" maxlength="60"></label></div>
+        <textarea id="routine-json" class="code-area" rows="10" spellcheck="false" aria-label="Rutina en JSON"></textarea>
+        <p class="small-note">Claves de paso: <code>pose</code>, <code>pose_all</code>, <code>pose_parallel</code>, <code>stance_offset</code>, <code>speed</code>, <code>mirror</code>, <code>center</code>, <code>release</code>, <code>wait</code>, <code>wait_done</code>, <code>eyes</code>, <code>face</code>, <code>text</code>.</p>
+        <div class="button-row"><button id="routine-save" class="button button-dark" type="button">Guardar rutina</button>
+          <button id="routine-new" class="button button-secondary" type="button">Nueva</button></div>
+      </section>
+    </section>
+
+    <!-- CARITAS -->
+    <section id="tab-faces" class="tab-page" hidden>
+      <div class="two-col">
+        <section class="panel">
+          <p class="section-kicker">PANTALLA OLED</p><h2>Editar caritas</h2>
+          <canvas id="face-canvas" class="face-canvas" width="128" height="64" aria-label="Vista previa de ojos OLED"></canvas>
+          <div class="form-grid">
+            <label>Cara<select id="face-select"></select></label>
+            <label>Nombre<input id="face-name" type="text" maxlength="40"></label>
+            <label>Transición (ms)<input id="face-transition" type="number" min="0" max="5000" value="250"></label>
+            <label>Duración (ms, 0 = fija)<input id="face-duration" type="number" min="0" max="600000" value="0"></label>
+          </div>
+          <div class="button-row">
+            <button id="face-send" class="button button-dark" type="button" data-needs="conn">Mostrar en el robot</button>
+            <button id="face-save" class="button button-secondary" type="button">Guardar cara</button>
+            <button id="face-delete" class="button button-secondary" type="button">Borrar</button>
+          </div>
+        </section>
+        <section class="panel">
+          <p class="section-kicker">PARÁMETROS</p><h2>Ambos ojos</h2>
+          <div id="face-params" class="param-grid"></div>
+          <h3>Solo un ojo <small>(vacío = igual que ambos)</small></h3>
+          <div class="table-wrap"><table class="data-table"><thead><tr><th>Parámetro</th><th>Izquierdo</th><th>Derecho</th></tr></thead><tbody id="face-eyes"></tbody></table></div>
+        </section>
+      </div>
+      <section class="panel">
+        <p class="section-kicker">TEXTO</p><h2>Mensaje en pantalla</h2>
+        <div class="form-grid">
+          <label>Texto (21 caracteres)<input id="text-message" type="text" maxlength="21"></label>
+          <label>Duración (ms)<input id="text-duration" type="number" min="0" value="3000"></label>
+        </div>
+        <div class="button-row">
+          <button id="text-send" class="button button-dark" type="button" data-needs="conn">Mostrar texto</button>
+          <button id="text-clear" class="button button-secondary" type="button" data-needs="conn">Borrar texto</button>
+          <button id="status-screen" class="button button-secondary" type="button" data-needs="conn">Alternar pantalla de estado</button>
+        </div>
+      </section>
+    </section>
+
+    <!-- SESAME -->
+    <section id="tab-sesame" class="tab-page" hidden>
+      <section class="panel sesame-panel">
+        <div class="section-heading"><div><p class="section-kicker">COREOGRAFÍAS</p><h2>Movimientos Sesame</h2></div><span class="section-tag">19 MOVIMIENTOS</span></div>
+        <p class="section-intro">Secuencias del robot abierto <a href="https://github.com/dorianborian/sesame-robot" target="_blank" rel="noopener">Sesame</a> (Dorian Todd, Apache-2.0). Cada cuadro se convierte en cuánto avanza la cadera y cuánto se levanta el pie respecto a tu <b>postura de apoyo</b> (Mover patas), con el sentido de avance guardado y dentro del rango de cada motor. Empieza con poca amplitud y sujeta al robot la primera vez.</p>
+        <div class="sesame-grid">
+          <div>
+            <p id="sesame-stance" class="pose-box"></p>
+            <div class="range-head"><label for="sesame-amplitude">Amplitud</label><output id="sesame-amplitude-value" for="sesame-amplitude">40%</output></div>
+            <input id="sesame-amplitude" class="range" type="range" min="10" max="100" step="5" value="40">
+            <div class="range-head"><label for="sesame-tempo">Ritmo</label><output id="sesame-tempo-value" for="sesame-tempo">100%</output></div>
+            <input id="sesame-tempo" class="range" type="range" min="50" max="150" step="10" value="100">
+            <div class="range-head"><label for="sesame-speed">Velocidad de servos</label><output id="sesame-speed-value" for="sesame-speed">150°/s</output></div>
+            <input id="sesame-speed" class="range" type="range" min="40" max="180" step="10" value="150">
+          </div>
+          <div>
+            <h3>Poses y gestos</h3>
+            <div id="sesame-moves" class="chip-grid three"></div>
+            <h3>Caminar y girar</h3>
+            <div class="inline-fields"><label for="sesame-cycles" class="unit">Ciclos</label><input id="sesame-cycles" type="number" min="1" max="20" value="3" inputmode="numeric"></div>
+            <div id="sesame-gaits" class="chip-grid"></div>
+            <p class="small-note">Al terminar vuelve a la postura de apoyo (salvo De pie, Descansar y Hacerse el muerto) y restaura la velocidad del perfil.</p>
+          </div>
+        </div>
+      </section>
+    </section>
+
+    <!-- BITÁCORA -->
+    <section id="tab-log" class="tab-page" hidden>
+      <section class="panel">
+        <div class="section-heading"><div><p class="section-kicker">ÓRDENES ENVIADAS</p><h2>Bitácora</h2></div><button id="log-clear" class="button button-secondary" type="button">Vaciar</button></div>
+        <div class="table-wrap"><table class="data-table log-table"><thead><tr><th>Hora</th><th>Origen</th><th>Orden</th></tr></thead><tbody id="log-rows"></tbody></table></div>
+      </section>
+    </section>
+
+    <section class="panel app-panel">
+      <p class="section-kicker">PWA · SIN CONEXIÓN A INTERNET</p><h2>Llévala contigo</h2>
+      <p>Instala la aplicación en tu móvil. La interfaz y todos tus datos (perfil, posturas, caras, rutinas y programas) quedan en este navegador; Bluetooth sigue requiriendo un navegador compatible.</p>
+      <button id="install-button" class="button button-secondary" type="button" hidden>Instalar aplicación</button>
+      <p id="install-help" class="small-note">En Android Chrome: menú ⋮ → Añadir a pantalla de inicio.</p>
     </section>
   </main>
 

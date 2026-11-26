@@ -8,8 +8,9 @@ Aplicación web instalable para controlar la araña robótica por Bluetooth Low 
 unit_robot_interactive_bl/
 ├── docs/
 │   ├── index.html              # entrada del sitio estático
-│   ├── app.js                  # Web Bluetooth y controles
-│   ├── robot-profile.js        # perfil del robot: rangos, inversión, velocidad, sentido y caras
+│   ├── app.js                  # Web Bluetooth e interfaz por pestañas
+│   ├── robot-core.js           # lógica del robot (equivalente BLE de server/main.py)
+│   ├── robot-profile.js        # datos por defecto: perfil de motores, patas, caras y rutinas
 │   ├── sesame-moves.js         # secuencias del robot Sesame (poses y marchas)
 │   ├── styles.css              # diseño adaptable
 │   ├── manifest.webmanifest    # instalación PWA
@@ -53,26 +54,44 @@ Abre `http://localhost:8000` en Chrome o Edge. Para usarla desde otro dispositiv
 4. Espera a que la web indique **PCA9685 listo** y mueve un servo con un ángulo seguro.
 5. Para instalarla, usa el botón **Instalar aplicación** si aparece o el menú del navegador **Añadir a pantalla de inicio**.
 
-## Perfil del robot (definido en la página)
+## Funciones de la página (equivalentes al proyecto general)
 
-Todo lo que describe al robot vive en la página, no en el firmware: rango mínimo y máximo, inversión, velocidad normal y sentido de cada motor, además de las caras de la OLED. Los valores por defecto están en `docs/robot-profile.js` y reproducen la tabla de fábrica del firmware (caderas 0–160°, pies 0–180°, R3 y L4 invertidos, 60 °/s). Se editan en el panel **Perfil del robot** y se guardan en el navegador.
+La PWA reproduce, sin servidor, las funciones del panel general (`app/` + `server/main.py`). Todo lo que describe al robot vive en la página y se guarda en el navegador: el perfil y las posturas por robot BLE, y las caras, rutinas y programas compartidos entre robots. El firmware solo ejecuta órdenes. `robot-core.js` traduce la lógica de `server/main.py`; `robot-profile.js` contiene los valores por defecto de `firmware/arana_api`, `server/faces.json` y `server/routines.json`.
 
-- Al conectar, la página lee el estado. Si los ocho motores están libres, envía `LIMIT`, `INVERT` y `SPEED`. Si alguno está sujeto, solo envía `SPEED`, porque `LIMIT` e `INVERT` liberan el PWM en el firmware y la araña caería; aplica el resto con **Enviar perfil al robot** cuando esté apoyada (se pide confirmación).
-- Los controles manuales, el movimiento de todos, los pares en espejo, la postura de apoyo y las coreografías se limitan al rango del perfil.
-- La columna **Sentido** indica si subir grados avanza la cadera o levanta el pie (por defecto R1 y R2 avanzan al subir, L1 y L2 al bajar, y los pies levantan al subir).
-- Las caras se definen como parámetros del comando `FACE` (tamaño, redondez, apertura, cejas, párpado y mirada) y se envían completas para no heredar valores anteriores. Si una cara no cabe en una escritura BLE (95 bytes), los ajustes de un solo ojo van en un segundo `FACE`.
+| Pestaña | Qué hace | Equivale a |
+| --- | --- | --- |
+| Demostración | Caras de un toque, programas y rutinas guardados con su botón de ejecutar | Demostración |
+| Servomotores | Mover cada servo, sujetar, liberar o activar; mover los 8, centrar, par en espejo; velocidad general por segundos para 90°; **Perfil del robot** (rango, inversión y velocidad) | Servomotores |
+| Mover patas | Adelante/Atrás/Arriba/Abajo por pata; postura de apoyo (guardar, recuperar, automática); recorrido y sentido de avance de R1, R2, L1, L2; elevación por pata con prueba y confirmación visual; paso de caminata (1 o 3 ciclos); postura acostada al iniciar con `POSE_HOLD` | Mover patas |
+| Bloques y rutinas | Programas de bloques (servo, mover pata, paso de pata, caminata, cara, esperar, volver al inicio, rutina o programa guardado) con 1–3 ciclos, comprobación de rango y conversión de cuatro pasos en caminata; probador rápido de secuencias; rutinas en JSON | Editar bloques |
+| Caritas | Editor de caras con vista previa OLED 128×64, ajustes por ojo, transición y duración; texto en pantalla; pantalla de estado | Editar caritas |
+| Sesame | 15 poses y 4 marchas del robot Sesame sobre la postura de apoyo | — |
+| Bitácora | Últimas 300 órdenes enviadas con su origen | Bitácora |
 
-## Movimientos Sesame
+Diferencias con el proyecto general:
 
-El panel **Movimientos Sesame** reproduce las 15 poses (de pie, descansar, saludar, bailar, nadar, señalar, flexiones, reverencia, tierno, raro, gusano, sacudir, encogerse, hacerse el muerto y cangrejo) y las 4 marchas (adelante, atrás y giros) del robot abierto [Sesame](https://github.com/dorianborian/sesame-robot) de Dorian Todd (Apache-2.0), tomadas de su `firmware/movement-sequences.h`.
+- **Sin asistente IA.** Necesita un servidor con Ollama; la PWA funciona sin red.
+- **Sin varios robots a la vez ni API key.** Bluetooth conecta un robot. Cada robot conserva su propio perfil y sus posturas, identificados por el navegador.
+- **Fin de movimiento estimado.** El estado BLE llega cada 100–250 ms por motor, demasiado lento para esperar a que termine un movimiento. La página calcula ese fin con distancia y velocidad, como hace el firmware, y corrige su modelo con cada estado recibido.
 
-Sesame usa los mismos nombres de motor que esta araña (R1/R2/L1/L2 giran la cadera, R3/R4/L3/L4 levantan el pie, con los pares R1-R3, R2-R4, L1-L3 y L2-L4), pero sus ángulos son absolutos para su propia mecánica. Por eso `sesame-moves.js` guarda los ángulos originales y la web los convierte en desplazamientos: cuánto avanza cada cadera y cuánto se levanta cada pie respecto a la postura de pie de Sesame. Ese desplazamiento, multiplicado por la **Amplitud** y orientado con el **Sentido** del perfil, se suma a la **postura de apoyo** y se limita al rango de cada motor. Cada cuadro se envía como un comando `POSE`; no hace falta reprogramar el ESP32. Cada movimiento muestra su propia cara, aproximada a la de Sesame con parámetros de `FACE`.
+### Perfil del robot y arranque
 
-1. Revisa el perfil del robot y envíalo con la araña apoyada o los motores libres.
-2. Coloca la araña de pie con los ocho motores sujetos (PWM activo) y pulsa **Guardar postura actual como apoyo**. Debe estar dentro del rango del perfil.
-3. Empieza con una amplitud del 30–40 % y sujeta al robot la primera vez.
+- Valores de fábrica: caderas 0–160°, pies 0–180°, R3 y L4 invertidos, 60 °/s. El rango nunca puede superar esos límites físicos.
+- Sentido de avance por defecto, como `WALK_SWING` del servidor: R1 avanza al subir grados; R2, L1 y L2 al bajar. Los pies levantan al subir grados. El sentido se cambia en **Recorrido de avance por motor** y lo usan la marcha, los bloques, el probador y Sesame.
+- Al conectar, si los ocho motores están libres (como tras un reinicio), la página envía `LIMIT`, `INVERT` y `SPEED`. Después recupera la postura elegida: acostada con `POSE_HOLD` o de apoyo con `POSE`. Son opciones excluyentes.
+- Si algún motor ya está sujeto, solo envía `SPEED`, porque `LIMIT` e `INVERT` liberan el PWM y la araña caería. Aplica el resto con **Enviar perfil al robot**, que pide confirmación.
 
-Durante la secuencia la web fija la velocidad de los ocho servos al valor de **Velocidad de servos** y, al terminar o interrumpirse, restaura la del perfil. **Detener** o una desconexión interrumpen la secuencia.
+### Caras
+
+Las caras usan los parámetros de `faces.json` (ancho, alto, redondez, apertura, cejas, párpado inferior, mirada, parpadeo y mirada automáticos, y ajustes por ojo). Se envían completas con `FACE T= D= …`. Si los ajustes por ojo no caben en una escritura BLE (95 bytes), van en un segundo `FACE`.
+
+### Movimientos Sesame
+
+Las 15 poses (de pie, descansar, saludar, bailar, nadar, señalar, flexiones, reverencia, tierno, raro, gusano, sacudir, encogerse, hacerse el muerto y cangrejo) y las 4 marchas (adelante, atrás y giros) vienen del robot abierto [Sesame](https://github.com/dorianborian/sesame-robot) de Dorian Todd (Apache-2.0), en concreto de su `firmware/movement-sequences.h`.
+
+Sesame usa los mismos nombres de motor (R1/R2/L1/L2 cadera, R3/R4/L3/L4 pie), pero sus ángulos son absolutos para su mecánica. `sesame-moves.js` guarda los originales. La página convierte cada cuadro en cuánto avanza la cadera y cuánto se levanta el pie respecto a la postura de pie de Sesame. Lo multiplica por la **Amplitud**, lo orienta con el sentido de avance y lo suma a la postura de apoyo, sin salir del rango del perfil. Cada movimiento muestra una cara aproximada a la de Sesame.
+
+Durante la coreografía la velocidad de los servos es la de **Velocidad de servos**. Al terminar o detenerse se restaura la del perfil.
 
 ## Protocolo BLE
 
@@ -86,4 +105,4 @@ Comandos que usa la web: `MOVE R1 100`, `MIRROR 1 80`, `ALL 90`, `POSE …`, `ST
 
 ## Alcance de la verificación
 
-El sketch se compiló para ESP32-C6 y los archivos web pasaron comprobaciones de sintaxis y referencias. La conexión y el movimiento reales requieren una placa y el robot físico.
+El sketch se compiló para ESP32-C6. La lógica de `robot-core.js` y la interfaz completa se probaron en Chrome sin interfaz con un robot BLE simulado: perfil al conectar, postura de apoyo, marcha, bloques, probador rápido, rutinas, caras, texto, postura acostada, Sesame y Detener. La conexión y el movimiento reales requieren la placa y el robot físico.
