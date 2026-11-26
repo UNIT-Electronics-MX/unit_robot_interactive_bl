@@ -333,7 +333,6 @@ async function actVerb(verb, n, source = "manual") {
   if (!t) return;
   if (verb === "FREE") { t.en = false; t.pwm = false; }
   if (verb === "ENABLE") t.en = true;
-  if (verb === "HOLD" && t.en) t.pwm = true;
   const value = estimate(n);
   if (value !== null) robot.motion[n] = { from: value, to: value, t0: now(), commandedAt: now() };
   emit("status");
@@ -357,6 +356,67 @@ async function actArm(source = "manual") {
   await send("ARM", source);
   for (const t of Object.values(robot.telemetry)) t.en = true;
   emit("status");
+}
+
+function waitForHeld(names, issuedAt, timeoutMs = 3500) {
+  return new Promise((resolve, reject) => {
+    let timer;
+    const check = () => {
+      if (!names.every((n) => robot.telemetry[n]?.at > issuedAt && held(n))) return;
+      clearTimeout(timer);
+      robot.listeners.delete(check);
+      resolve();
+    };
+    robot.listeners.add(check);
+    timer = setTimeout(() => {
+      robot.listeners.delete(check);
+      const missing = names.filter((n) => !(robot.telemetry[n]?.at > issuedAt && held(n)));
+      for (const n of missing) if (robot.telemetry[n]) robot.telemetry[n].pwm = false;
+      emit("status");
+      reject(new RobotError(`El robot no confirmó la sujeción de ${missing.join(", ")}. Revisa el PCA9685 y vuelve a intentarlo.`));
+    }, timeoutMs);
+    check();
+  });
+}
+
+function requireHoldable(names) {
+  if (!robot.pca) fail("PCA9685 no detectado; revisa alimentación y cableado antes de sujetar.");
+  if (robot.run.status === "running") fail("Detén la rutina antes de sujetar motores.");
+  for (const n of names) {
+    requireServo(n);
+    if (!robot.telemetry[n]) fail(`Espera a recibir el estado de ${n}.`);
+    if (!settled(n)) fail(`${n} aún no está quieto.`);
+  }
+}
+
+async function holdServos(names, source) {
+  requireHoldable(names);
+  const pending = names.filter((n) => !held(n));
+  const token = robot.run.token;
+  const issuedAt = now();
+  for (const n of pending) {
+    if (token !== robot.run.token) fail("Sujeción interrumpida.");
+    if (!robot.telemetry[n].en) {
+      await actVerb("ENABLE", n, source);
+      await sleep(BURST_GAP_MS);
+    }
+    await actVerb("HOLD", n, source);
+    await sleep(BURST_GAP_MS);
+  }
+  if (token !== robot.run.token) fail("Sujeción interrumpida.");
+  // STATUS inicia una ronda de ocho notificaciones; la escritura BLE por sí sola
+  // solo confirma que se encoló la orden.
+  await send("STATUS", source);
+  await waitForHeld(names, issuedAt);
+}
+
+async function actHoldOne(n, source = "manual") {
+  await holdServos([n], source);
+}
+
+async function actHoldAll(source = "manual") {
+  if (!allReported()) fail("Espera a recibir el estado de los ocho servos.");
+  await holdServos(SERVOS, source);
 }
 
 // ---------- perfil del robot ----------
@@ -545,6 +605,15 @@ function saveStance() {
   Object.assign(robot.profile, { stance: pose, walkLifts: null, autoStance: true, autoStartup: false });
   saveRobot();
   return pose;
+}
+function useMeasuredStandingPose() {
+  for (const n of SERVOS) {
+    if (!inRange(n, MEASURED_STANDING_POSE[n])) fail(`${n}: la postura medida no cabe en su rango actual.`);
+  }
+  robot.profile.stance = clone(MEASURED_STANDING_POSE);
+  robot.profile.walkLifts = null;
+  saveRobot();
+  return robot.profile.stance;
 }
 async function restoreStance() {
   const stance = getStance();
@@ -751,19 +820,26 @@ function deleteRoutine(name) {
   storage.set(KEY_ROUTINES, robot.routines);
   emit("catalog");
 }
-async function runRoutine(name, repeat) {
+async function runRoutine(name, repeat, amplitude = 1) {
   const routine = robot.routines[name];
   if (!routine) fail(`No existe la rutina «${name}».`);
+  if (![1, 2, 3].includes(amplitude)) fail("Amplitud permitida: 1×, 2× o 3×.");
   const times = repeat ?? routine.repeat ?? 1;
-  validateRoutine(routine.steps, times);
+  const steps = amplitude === 1 ? routine.steps : routine.steps.map((step) => (
+    "stance_offset" in step
+      ? { ...step, stance_offset: Object.fromEntries(Object.entries(step.stance_offset).map(([n, offset]) => [n, offset * amplitude])) }
+      : step
+  ));
+  if (amplitude !== 1 && !steps.some((step) => "stance_offset" in step)) fail("Esta rutina no tiene desplazamientos ajustables.");
+  validateRoutine(steps, times);
   if (routine.base_pose) {
     requireAllReady("ejecutar la rutina");
     for (const n of SERVOS) {
       if (Math.abs(current(n) - routine.base_pose[n]) > 2) fail("Lleva la araña a la postura con la que se guardó esta secuencia antes de ejecutarla.");
     }
   }
-  checkStepsForDevice(routine.steps);
-  return runSteps(name, routine.steps, times);
+  checkStepsForDevice(steps);
+  return runSteps(name, steps, times);
 }
 
 // ---------- ejecución de pasos (exec_step) ----------
@@ -1060,23 +1136,26 @@ function buildProgramSteps(rawBlocks, cycles) {
   const blocks = expandProgramBlocks(rawBlocks, cycles);
   if (robot.run.status === "running") fail("Espera a que termine el movimiento actual.");
   const needsPose = blocks.some((block) => ["move", "leg_step", "walk_cycle", "home"].includes(block.type));
-  const start = {};
-  if (needsPose) {
-    if (!allReported()) fail("Los bloques de movimiento necesitan los ocho motores.");
-    for (const n of SERVOS) {
-      if (!ready(n)) fail(`${n} debe estar sujeto y quieto.`);
-      start[n] = round1(current(n));
-    }
-  }
-  // Ocho bloques Servo al comienzo (por ejemplo, el programa "parado") son el punto de regreso.
-  let home = { ...start };
+  // Una postura completa al inicio permite arrancar el programa con PWM libre.
   const initial = {};
   for (const block of blocks) {
     if (block.type !== "servo" || block.motor in initial) break;
     initial[block.motor] = block.angle;
     if (Object.keys(initial).length === 8) break;
   }
-  if (Object.keys(initial).length === 8) home = { ...start, ...initial };
+  const hasInitialPose = Object.keys(initial).length === 8;
+  const start = {};
+  if (needsPose) {
+    if (!allReported()) fail("Los bloques de movimiento necesitan los ocho motores.");
+    for (const n of SERVOS) {
+      if (!robot.telemetry[n].en) fail(`${n} está deshabilitado; pulsa «Habilitar servos» primero.`);
+      if (!hasInitialPose && !ready(n)) fail(`${n} debe estar sujeto y quieto. Usa «Demostración → Sujeción» antes de ejecutar la caminata.`);
+      start[n] = round1(current(n));
+    }
+  }
+  // Ocho bloques Servo al comienzo (por ejemplo, el programa "parado") son el punto de regreso.
+  let home = { ...start };
+  if (hasInitialPose) home = { ...start, ...initial };
   const homePose = SERVOS.map((n) => home[n]);
   const steps = [];
   let hasMove = false;
@@ -1102,7 +1181,7 @@ function buildProgramSteps(rawBlocks, cycles) {
       case "servo": {
         const { motor, angle } = block;
         if (!inRange(motor, angle)) fail(`Bloque ${index}: ${motor} recibiría ${angle}°, fuera de ${cfg(motor).min}°–${cfg(motor).max}°.`);
-        if (!ready(motor)) fail(`Bloque ${index}: sujeta ${motor} y espera a que termine su movimiento.`);
+        if (!ready(motor) && !(hasInitialPose && robot.telemetry[motor]?.en)) fail(`Bloque ${index}: sujeta ${motor} y espera a que termine su movimiento.`);
         steps.push({ pose_parallel: { [motor]: angle }, wait_done: true, single: true });
         if (positionKnown) simulated[motor] = angle;
         break;
@@ -1156,6 +1235,12 @@ function buildProgramSteps(rawBlocks, cycles) {
           const { swing, lift } = LEGS[leg];
           const setting = block.legs[leg];
           const advance = forwardSign(swing) * setting.stride;
+          if (positionKnown) {
+            const spec = walkSwingSpec(swing);
+            if (simulated[swing] < spec.min || simulated[swing] > spec.max || simulated[swing] + advance < spec.min || simulated[swing] + advance > spec.max) {
+              fail(`Bloque ${index}: ${swing} no tiene recorrido para avanzar ${setting.stride}° dentro de ${spec.min}°–${spec.max}°.`);
+            }
+          }
           const [first, second, third] = ["R1", "L2"].includes(leg) ? [0, 1, 2] : [3, 4, 5];
           phases[first][lift] = setting.lift;
           phases[second][swing] = advance;

@@ -1,6 +1,6 @@
-const CACHE_NAME = "unit-spider-ble-v5";
+const CACHE_NAME = "unit-spider-ble-v16";
 const FILES = [
-  "./", "./index.html", "./styles.css", "./app.js?v=5", "./robot-profile.js", "./sesame-moves.js", "./robot-core.js", "./manifest.webmanifest",
+  "./", "./index.html", "./styles.css?v=16", "./app.js?v=16", "./robot-profile.js?v=9", "./sesame-moves.js?v=13", "./robot-core.js?v=12", "./manifest.webmanifest",
   "./icons/spider.svg", "./icons/spider-192.png", "./icons/spider-512.png"
 ];
 

@@ -9,92 +9,81 @@
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./icons/spider.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./icons/spider-192.png">
-  <link rel="stylesheet" href="./styles.css">
-  <script src="./robot-profile.js" defer></script>
-  <script src="./sesame-moves.js" defer></script>
-  <script src="./robot-core.js" defer></script>
-  <script src="./app.js?v=5" defer></script>
+  <link rel="stylesheet" href="./styles.css?v=16">
+  <script src="./robot-profile.js?v=9" defer></script>
+  <script src="./sesame-moves.js?v=13" defer></script>
+  <script src="./robot-core.js?v=12" defer></script>
+  <script src="./app.js?v=16" defer></script>
   <title>Spider BLE · Control del robot</title>
 </head>
 <body>
   <a class="skip-link" href="#controls">Ir a controles</a>
   <header class="topbar">
-    <div class="brand"><span class="brand-mark" aria-hidden="true">✳</span><span>UNIT <b>SPIDER</b><small>CONTROL BLE</small></span></div>
-    <span class="offline-pill" id="network-state">Disponible sin conexión</span>
+    <div class="topbar-row">
+      <button type="button" class="menu-toggle" id="menu-toggle" aria-expanded="false" aria-controls="tab-list" aria-label="Secciones">
+        <span class="menu-icon" aria-hidden="true"><span></span><span></span><span></span></span>
+      </button>
+      <div class="brand"><img class="brand-mark" src="./icons/spider.svg" alt=""><span>UNIT <b>SPIDER</b><small id="menu-current">CONTROL BLE</small></span></div>
+      <div class="topbar-actions">
+        <button id="stop-button" class="button button-stop" type="button" disabled>■ Detener</button>
+        <button id="servo-toggle" class="button button-secondary" type="button" disabled aria-pressed="false">Habilitar servos</button>
+        <button id="connect-button" class="button button-primary connect-toggle" type="button" aria-pressed="false"><span id="connection-dot" class="connection-dot" aria-hidden="true"></span><span id="connect-label">Conectar</span></button>
+      </div>
+    </div>
+    <nav class="tabs" id="tabs" aria-label="Secciones">
+      <div class="tab-list" id="tab-list">
+        <button type="button" data-tab="demo" class="active">Demostración</button>
+        <button type="button" data-tab="servos">Servomotores</button>
+        <button type="button" data-tab="legs">Mover patas</button>
+        <button type="button" data-tab="blocks">Bloques y rutinas</button>
+        <button type="button" data-tab="faces">Caritas</button>
+        <button type="button" data-tab="sesame">Sesame</button>
+        <button type="button" data-tab="log">Bitácora</button>
+      </div>
+    </nav>
   </header>
 
   <main id="controls">
     <section class="hero" aria-labelledby="hero-title">
-      <div class="hero-copy">
-        <p class="eyebrow">ESP32-C6 · 8 SERVOS · BLUETOOTH LE</p>
-        <h1 id="hero-title">Tu araña, en tus manos.</h1>
-        <p class="hero-description">Conecta directamente al robot, ajusta cada pata y controla sus movimientos desde el móvil.</p>
-        <div class="connection-row">
-          <span id="connection-dot" class="connection-dot" aria-hidden="true"></span>
-          <strong id="connection-label">Sin conectar</strong>
-          <span class="divider" aria-hidden="true"></span>
-          <span id="hardware-label">Hardware sin consultar</span>
+      <div class="connection-heading">
+        <div>
+          <p class="eyebrow">UNIT SPIDER / CONTROL BLE</p>
+          <h1 id="hero-title">Robot araña</h1>
         </div>
-        <div class="hero-actions">
-          <button class="button button-primary" id="connect-button" type="button">Conectar robot</button>
-          <button class="button button-outline" id="disconnect-button" type="button" disabled>Desconectar</button>
-        </div>
-        <p id="connection-help" class="help-text">Usa Chrome o Edge en Android o escritorio, con Bluetooth activo y una página HTTPS.</p>
+        <div class="connection-status"><strong id="connection-label">Sin conectar</strong></div>
       </div>
-      <div class="hero-graphic" aria-hidden="true">
-        <div class="graphic-ring ring-one"></div><div class="graphic-ring ring-two"></div>
-        <svg viewBox="0 0 360 320" role="presentation">
-          <g class="leg-lines" fill="none" stroke="currentColor" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M155 123 99 86 42 103 M150 143 82 143 24 164 M151 175 93 205 39 247 M162 199 124 247 96 284"/>
-            <path d="M205 123 261 86 318 103 M210 143 278 143 336 164 M209 175 267 205 321 247 M198 199 236 247 264 284"/>
-          </g>
-          <g fill="currentColor"><circle cx="98" cy="86" r="10"/><circle cx="263" cy="86" r="10"/><circle cx="82" cy="143" r="10"/><circle cx="278" cy="143" r="10"/><circle cx="93" cy="205" r="10"/><circle cx="267" cy="205" r="10"/></g>
-          <path d="M180 81c-35 0-60 24-60 58 0 27 15 40 23 48-1 35 14 66 37 66s38-31 37-66c8-8 23-21 23-48 0-34-25-58-60-58Z" fill="#d9ed9c"/>
-          <ellipse cx="180" cy="161" rx="37" ry="50" fill="#101b28"/><circle cx="165" cy="151" r="6" fill="#d9ed9c"/><circle cx="195" cy="151" r="6" fill="#d9ed9c"/>
-          <path d="M165 185c8 8 22 8 30 0" fill="none" stroke="#d9ed9c" stroke-width="4" stroke-linecap="round"/>
-        </svg>
-        <span class="graphic-caption">SPIDER / LIVE CONTROL</span>
-      </div>
+      <p id="hardware-label" class="connection-meta">Hardware sin consultar</p>
+      <p class="connection-meta"><span id="run-status" class="run-status">Sin rutinas en marcha.</span> · <span class="offline-pill" id="network-state">Disponible sin conexión</span></p>
+      <p id="connection-help" class="help-text">Chrome o Edge, Bluetooth activo y conexión HTTPS.</p>
     </section>
 
     <div id="notice" class="notice" role="status" aria-live="polite">Conecta el robot para activar los controles.</div>
 
-    <section class="panel safety-panel" aria-labelledby="safety-title">
-      <div><p class="section-kicker">CONTROL INMEDIATO</p><h2 id="safety-title">Movimiento seguro</h2>
-        <p>Detener corta cualquier rutina o programa y mantiene la posición. Liberar apaga los pulsos. Al desconectarse BLE, el firmware detiene el movimiento.</p>
-        <p id="run-status" class="run-status">Sin rutinas en marcha.</p></div>
-      <div class="safety-actions">
-        <button id="stop-button" class="button button-stop" type="button" disabled>■ Detener</button>
-        <button id="release-button" class="button button-secondary" type="button" disabled>Liberar servos</button>
-        <button id="arm-button" class="button button-secondary" type="button" disabled>Habilitar servos</button>
-      </div>
-    </section>
-
-    <nav class="tabs" aria-label="Secciones">
-      <button type="button" data-tab="demo" class="active">Demostración</button>
-      <button type="button" data-tab="servos">Servomotores</button>
-      <button type="button" data-tab="legs">Mover patas</button>
-      <button type="button" data-tab="blocks">Bloques y rutinas</button>
-      <button type="button" data-tab="faces">Caritas</button>
-      <button type="button" data-tab="sesame">Sesame</button>
-      <button type="button" data-tab="log">Bitácora</button>
-    </nav>
-
     <!-- DEMOSTRACIÓN -->
     <section id="tab-demo" class="tab-page">
-      <div class="two-col">
-        <section class="panel">
-          <p class="section-kicker">UN TOQUE</p><h2>Caras</h2>
-          <p class="section-intro">Las caras funcionan incluso mientras corre un programa.</p>
-          <div id="demo-faces" class="chip-grid"></div>
-        </section>
-        <section class="panel">
-          <p class="section-kicker">GUARDADOS</p><h2>Programas de bloques</h2>
-          <div id="demo-programs" class="item-list"></div>
-          <h3>Rutinas</h3>
-          <div id="demo-routines" class="item-list"></div>
-        </section>
-      </div>
+      <section class="panel demo-hold" aria-labelledby="demo-hold-title">
+        <div><p class="section-kicker">ANTES DE MOVER</p><h2 id="demo-hold-title">Sujeción</h2>
+          <p class="section-intro">Sujeta los ocho servos a la vez en el ángulo que reportan. Tras reiniciar, comprueba que coinciden con la posición física.</p></div>
+        <div class="demo-hold-controls">
+          <button id="demo-hold-all" class="button button-dark" type="button">Sujetar los 8</button>
+          <div class="hold-meter" aria-hidden="true"><span id="demo-hold-bar"></span></div>
+          <span id="demo-hold-status" class="small-note" role="status" aria-live="polite">Conecta el robot para ver la sujeción.</span>
+        </div>
+      </section>
+      <section class="panel choreo-panel" aria-labelledby="demo-choreo-title">
+        <div class="section-heading"><div><p class="section-kicker">COREOGRAFÍAS</p><h2 id="demo-choreo-title">Bailes y gestos</h2></div><span id="demo-choreo-settings" class="section-tag"></span></div>
+        <p id="demo-choreo-stance" class="choreo-stance" role="status"></p>
+        <h3 class="choreo-group">Poses y gestos</h3>
+        <div id="demo-choreo-moves" class="choreo-grid"></div>
+        <h3 class="choreo-group">Caminar y girar</h3>
+        <div id="demo-choreo-gaits" class="choreo-grid gaits"></div>
+        <p id="demo-choreo-feedback" class="choreo-feedback" role="status" aria-live="polite"></p>
+      </section>
+      <section class="panel">
+        <p class="section-kicker">UN TOQUE</p><h2>Caras</h2>
+        <p class="section-intro">Las caras funcionan incluso mientras corre un programa.</p>
+        <div id="demo-faces" class="chip-grid"></div>
+      </section>
     </section>
 
     <!-- SERVOMOTORES -->
@@ -152,10 +141,12 @@
       <div class="two-col">
         <section class="panel">
           <p class="section-kicker">PASO 1</p><h2>Postura de apoyo</h2>
-          <p class="section-intro">Coloca manualmente los ocho motores en una posición estable, comprueba que los cuatro pies estén apoyados y guarda esa postura. Las rutinas pregrabadas de patas la necesitan como punto de partida. Al guardarla se borran las elevaciones calibradas.</p>
+          <p class="section-intro">90° no es una postura de pie universal: en tu montaje puede ser acostado. Ajusta los ocho motores, uno a uno, hasta que los cuatro pies apoyen el cuerpo; espera a que terminen y guarda esos ángulos como postura de apoyo. Las rutinas pregrabadas de patas parten de esa postura. Al guardarla se borran las elevaciones calibradas.</p>
+          <p class="small-note">Postura de pie medida: R1 71° · R2 77° · R3 40° · R4 46° · L1 90° · L2 90° · L3 44° · L4 40°.</p>
           <p id="stance-info" class="pose-box"></p>
           <div class="button-row">
-            <button id="stance-save" class="button button-dark" type="button" data-needs="conn">Guardar postura y activar auto</button>
+            <button id="stance-save" class="button button-dark" type="button" data-needs="conn">Guardar postura de pie y activar auto</button>
+            <button id="stance-measured" class="button button-secondary" type="button" data-needs="conn">Usar postura medida (sin mover)</button>
             <button id="stance-restore" class="button button-secondary" type="button" data-needs="move">Recuperar postura guardada</button>
           </div>
           <label class="check"><input id="stance-auto" type="checkbox"> Recuperar automáticamente al conectar tras un reinicio</label>
@@ -202,6 +193,7 @@
     <section id="tab-blocks" class="tab-page" hidden>
       <section class="panel">
         <div class="section-heading"><div><p class="section-kicker">PROGRAMACIÓN VISUAL</p><h2>Programa de bloques</h2></div><span id="blocks-count" class="section-tag"></span></div>
+        <p id="blocks-readiness" class="small-note" role="status"></p>
         <div class="form-grid">
           <label>Nombre<input id="program-name" type="text" maxlength="60" placeholder="mi_programa"></label>
           <label>Descripción<input id="program-description" type="text" maxlength="200"></label>

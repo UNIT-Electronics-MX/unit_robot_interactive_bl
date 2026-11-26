@@ -14,7 +14,11 @@ let statusCharacteristic = null;
 let pendingWrite = Promise.resolve();
 let deferredInstall = null;
 let recoveryPending = false;
+let recoveryInProgress = false;
 let renderQueued = false;
+let holdPending = false;
+let connecting = false;
+const servosArmed = () => SERVOS.some((n) => robot.telemetry[n]?.en);
 const cards = new Map();
 
 // ==========================================
@@ -76,14 +80,27 @@ function isConnected() {
 function updateControls() {
   const connected = isConnected();
   const running = robot.run.status === "running";
-  const canMove = connected && robot.pca && !running;
+  const canHold = connected && robot.pca && !running && !holdPending && !recoveryPending && !recoveryInProgress;
+  const canMove = canHold;
   document.querySelectorAll("[data-needs]").forEach((node) => {
     const need = node.dataset.needs;
-    node.disabled = need === "conn" ? !connected : need === "move" ? !canMove : false;
+    node.disabled = need === "conn" ? !connected : need === "move" ? !canMove : need === "hold" ? !canHold : false;
   });
-  $("connect-button").disabled = connected;
-  $("disconnect-button").disabled = !connected;
-  for (const id of ["stop-button", "release-button", "arm-button"]) $(id).disabled = !connected;
+  // Conexión: un solo botón de dos estados.
+  $("connect-button").disabled = connecting;
+  $("connect-button").setAttribute("aria-pressed", String(connected));
+  $("connect-button").classList.toggle("is-on", connected);
+  $("connect-label").textContent = connecting ? "Conectando…" : connected ? "Desconectar" : "Conectar";
+  $("stop-button").disabled = !connected;
+  // Servos: habilitados (al menos uno con EN) → «Liberar»; si no → «Habilitar».
+  const armed = connected && servosArmed();
+  $("servo-toggle").disabled = !connected || (!armed && (recoveryPending || recoveryInProgress));
+  $("servo-toggle").setAttribute("aria-pressed", String(armed));
+  $("servo-toggle").classList.toggle("is-on", armed);
+  $("servo-toggle").textContent = armed ? "Liberar servos" : "Habilitar servos";
+  const allHeld = connected && SERVOS.every(held);
+  $("demo-hold-all").disabled = !canHold || allHeld;
+  $("demo-hold-all").textContent = holdPending ? "Sujetando…" : allHeld ? "✓ Los 8 sujetos" : "Sujetar los 8";
   $("connection-dot").classList.toggle("connected", connected);
   $("connection-label").textContent = connected ? `${device.name || "Spider-BLE"} conectado` : "Sin conectar";
   $("hardware-label").textContent = connected
@@ -131,13 +148,21 @@ function handleStatus(event) {
 }
 
 async function recover() {
-  const result = await act(() => recoverOnConnect());
-  if (!result) return;
-  if (!result.applied) {
-    setNotice(`Motores sujetos (${result.holding.join(", ")}): se envió solo la velocidad. Pulsa «Enviar perfil al robot» con la araña apoyada para aplicar rangos e inversión.`, true);
-  } else if (result.restored === "startup") setNotice("Perfil enviado y postura acostada aplicada con POSE_HOLD.");
-  else if (result.restored === "stance") setNotice("Perfil enviado; recuperando la postura de apoyo guardada.");
-  else setNotice("Perfil de la página enviado al robot. Los motores siguen libres hasta el primer movimiento.");
+  recoveryInProgress = true;
+  updateControls();
+  try {
+    const result = await act(() => recoverOnConnect());
+    if (!result) return;
+    if (!result.applied) {
+      setNotice(`Motores sujetos (${result.holding.join(", ")}): se envió solo la velocidad. Pulsa «Enviar perfil al robot» con la araña apoyada para aplicar rangos e inversión.`, true);
+    } else if (result.restored === "startup") setNotice("Perfil enviado y postura acostada aplicada con POSE_HOLD.");
+    else if (result.restored === "stance") setNotice("Perfil enviado; recuperando la postura de apoyo guardada.");
+    else setNotice("Perfil de la página enviado al robot. Los motores siguen libres hasta el primer movimiento.");
+  } finally {
+    recoveryInProgress = false;
+    updateControls();
+    scheduleRender();
+  }
 }
 
 function disconnected() {
@@ -146,6 +171,7 @@ function disconnected() {
   commandCharacteristic = null;
   statusCharacteristic = null;
   recoveryPending = false;
+  recoveryInProgress = false;
   resetTelemetry();
   updateControls();
   setNotice("Robot desconectado. El firmware detuvo las trayectorias activas.");
@@ -154,7 +180,8 @@ function disconnected() {
 async function connect() {
   if (!navigator.bluetooth) { setNotice("Este navegador no admite Web Bluetooth. Usa Chrome o Edge en Android o escritorio.", true); return; }
   if (!window.isSecureContext) { setNotice("Abre la aplicación mediante HTTPS o localhost para usar Bluetooth.", true); return; }
-  $("connect-button").disabled = true;
+  connecting = true;
+  updateControls();
   setNotice("Buscando Spider-BLE…");
   try {
     const selected = await navigator.bluetooth.requestDevice({ filters: [{ namePrefix: "Spider-BLE" }], optionalServices: [SERVICE_UUID] });
@@ -181,6 +208,7 @@ async function connect() {
     if (error.name === "NotFoundError") setNotice("No se seleccionó ningún robot.");
     else setNotice(`No se pudo conectar: ${error.message || error.name}`, true);
   } finally {
+    connecting = false;
     updateControls();
   }
 }
@@ -189,24 +217,68 @@ async function connect() {
 // PESTAÑAS Y CONTROL INMEDIATO
 // ==========================================
 function setupTabs() {
+  // En móvil la barra se muestra como menú hamburguesa; en escritorio el botón está oculto.
+  const setMenu = (open) => {
+    $("tabs").classList.toggle("open", open);
+    document.querySelector(".topbar").classList.toggle("menu-open", open);
+    $("menu-toggle").setAttribute("aria-expanded", String(open));
+  };
+  $("menu-toggle").addEventListener("click", () => setMenu(!$("tabs").classList.contains("open")));
+  document.addEventListener("click", (event) => { if (!event.target.closest(".topbar")) setMenu(false); });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && $("tabs").classList.contains("open")) { setMenu(false); $("menu-toggle").focus(); }
+  });
   document.querySelectorAll("[data-tab]").forEach((tab) => {
     tab.addEventListener("click", () => {
       document.querySelectorAll("[data-tab]").forEach((other) => other.classList.toggle("active", other === tab));
       document.querySelectorAll(".tab-page").forEach((page) => { page.hidden = page.id !== `tab-${tab.dataset.tab}`; });
+      $("menu-current").textContent = tab.textContent;
+      setMenu(false);
     });
   });
 }
 
 function setupSafety() {
-  $("connect-button").addEventListener("click", connect);
-  $("disconnect-button").addEventListener("click", async () => {
+  $("connect-button").addEventListener("click", async () => {
+    if (!isConnected()) return connect();
     cancelRun();
-    if (isConnected()) await writeCommand("STOP");
+    await writeCommand("STOP");
     if (device?.gatt?.connected) device.gatt.disconnect();
   });
   $("stop-button").addEventListener("click", () => act(() => actStop(), "Movimiento detenido. Los servos conservan su posición actual."));
-  $("release-button").addEventListener("click", () => act(() => actRelease(), "Servos liberados. Pulsa Habilitar antes de moverlos de nuevo."));
-  $("arm-button").addEventListener("click", () => act(() => actArm(), "Servos habilitados. Los pulsos se activan al recibir movimiento."));
+  $("servo-toggle").addEventListener("click", () => (servosArmed()
+    ? act(() => actRelease(), "Servos liberados. Pulsa Habilitar antes de moverlos de nuevo.")
+    : act(() => actArm(), "Servos habilitados. Los pulsos se activan al recibir movimiento.")));
+}
+
+async function holdAction(fn, success) {
+  if (holdPending) return;
+  if (recoveryPending || recoveryInProgress) { setNotice("Espera a que termine la sincronización del perfil del robot.", true); return; }
+  holdPending = true;
+  updateControls();
+  scheduleRender();
+  try { await act(fn, success); } finally { holdPending = false; updateControls(); scheduleRender(); }
+}
+
+function setupDemoHold() {
+  $("demo-hold-all").addEventListener("click", () => {
+    if (!allReported()) { setNotice("Espera el estado de los ocho servos.", true); return; }
+    const pending = SERVOS.filter((name) => !held(name));
+    if (!pending.length) return;
+    const angles = pending.map((name) => `${name} ${shown(current(name))}`).join(" · ");
+    if (!window.confirm(`Se sujetarán ${pending.length} servos en los ángulos que reportan: ${angles}. Tras reiniciar, esos ángulos pueden no coincidir con la posición física. ¿La comprobaste?`)) return;
+    holdAction(() => actHoldAll(), "El robot confirmó la sujeción de los ocho servos.");
+  });
+}
+
+function renderDemoHoldStatus() {
+  const count = SERVOS.filter(held).length;
+  $("demo-hold-status").textContent = !isConnected() ? "Conecta el robot para ver la sujeción."
+    : recoveryPending || recoveryInProgress ? "Sincronizando el perfil del robot…"
+    : holdPending ? `Confirmando sujeción… ${count}/8 motores confirmados`
+    : count === 8 ? "8/8 servos sujetos · listo para coreografías" : `${count}/8 servos sujetos · pulsa «Sujetar los 8»`;
+  $("demo-hold-bar").style.width = `${isConnected() ? (count / 8) * 100 : 0}%`;
+  $("demo-hold-bar").classList.toggle("full", count === 8 && isConnected());
 }
 
 function renderRunStatus() {
@@ -241,7 +313,7 @@ function renderServoCards() {
     slider.addEventListener("input", () => { output.value = `${slider.value}°`; edited = true; });
     const actions = el("div", { className: "servo-actions" }, [
       button("Mover", () => act(() => actMove(name, Number(slider.value)), `${name}: movimiento a ${slider.value}°.`).then(() => { edited = false; }), { needs: "move", small: true }),
-      button("Sujetar", () => act(() => actVerb("HOLD", name), `${name}: PWM activo en su ángulo actual.`), { needs: "conn", small: true }),
+      button("Sujetar", () => holdAction(() => actHoldOne(name), `${name}: sujeción confirmada por el robot.`), { needs: "hold", small: true }),
       button("Liberar", () => act(() => actVerb("FREE", name), `${name}: liberado.`), { needs: "conn", small: true }),
       button("Activar", () => act(() => actVerb("ENABLE", name), `${name}: habilitado.`), { needs: "conn", small: true })
     ]);
@@ -392,6 +464,8 @@ function setupLegs() {
   }
 
   $("stance-save").addEventListener("click", () => act(() => saveStance(), "Postura de apoyo guardada y recuperación automática activada. Calibra de nuevo las elevaciones."));
+  $("stance-measured").addEventListener("click", () => act(() => useMeasuredStandingPose(),
+    "Postura medida guardada para este robot. No se enviaron movimientos. Calibra de nuevo las elevaciones."));
   $("stance-restore").addEventListener("click", () => act(() => restoreStance(), "Recuperando la postura de apoyo."));
   $("stance-auto").addEventListener("change", (event) => act(() => setAutoStance(event.target.checked),
     event.target.checked ? "Se recuperará la postura de apoyo al conectar tras un reinicio." : "Recuperación automática desactivada."));
@@ -502,7 +576,9 @@ const BLOCK_TYPES = {
   servo: { label: "Servo individual", make: () => ({ type: "servo", motor: "R1", angle: Math.round(target("R1") ?? 90) }) },
   move: { label: "Mover pata", make: () => ({ type: "move", leg: "R1", direction: "up", degrees: 5 }) },
   leg_step: { label: "Paso de pata", make: () => ({ type: "leg_step", leg: "R1", stride: 5, lift: 10 }) },
-  walk_cycle: { label: "Caminata", make: () => ({ type: "walk_cycle", legs: Object.fromEntries(["R1", "L2", "L1", "R2"].map((l) => [l, { stride: 5, lift: 20 }])), pause: 0 }) },
+  walk_cycle: { label: "Caminata", make: () => ({ type: "walk_cycle", legs: Object.fromEntries(["R1", "L2", "L1", "R2"].map((leg) => [leg, {
+    stride: 3, lift: robot.profile.walkLifts?.[LEGS[leg].lift] ?? 5
+  }])), pause: 0 }) },
   face: { label: "Cara", make: () => ({ type: "face", name: "normal", transition_ms: 250, duration_ms: 0 }) },
   wait: { label: "Esperar", make: () => ({ type: "wait", seconds: 0.5 }) },
   home: { label: "Volver al inicio", make: () => ({ type: "home" }) },
@@ -590,6 +666,15 @@ function refreshBlocksMeta() {
   const count = blocksDraft.blocks.length ? countProgramSteps(blocksDraft.blocks, blocksDraft.cycles) : 0;
   $("blocks-count").textContent = count === null ? "REVISA LOS BLOQUES" : `${count} PASOS`;
   $("program-convert").hidden = !convertibleSteps(blocksDraft.blocks);
+  const hasWalk = blocksDraft.blocks.some((block) => ["walk_cycle", "leg_step", "move"].includes(block.type));
+  const opening = blocksDraft.blocks.slice(0, 8);
+  const hasInitialPose = opening.length === 8 && opening.every((block) => block.type === "servo")
+    && new Set(opening.map((block) => block.motor)).size === 8;
+  const free = SERVOS.filter((name) => !held(name));
+  $("blocks-readiness").textContent = !hasWalk ? "" : !isConnected() ? "Conecta el robot antes de probar la caminata."
+    : free.length && hasInitialPose ? "Los ocho primeros bloques fijarán la postura antes de mover las patas. Comprueba sus ángulos físicos."
+      : free.length ? `${free.length} servos sin sujetar. Ve a Demostración → Sujeción antes de ejecutar la caminata.`
+      : "Los ocho servos están sujetos. Comprueba que la postura actual tenga espacio para los pasos.";
   let error = "";
   if (blocksDraft.blocks.length) {
     try { expandProgramBlocks(blocksDraft.blocks, blocksDraft.cycles); } catch (e) { error = e.message; }
@@ -785,11 +870,11 @@ function renderSequence() {
 // ==========================================
 // RUTINAS
 // ==========================================
-async function runSavedRoutine(name, feedback, needsStance) {
-  feedback.textContent = "Iniciando rutina…";
+async function runSavedRoutine(name, feedback, needsStance, amplitude = 1) {
+  feedback.textContent = `Iniciando rutina${amplitude > 1 ? ` a ${amplitude}×` : ""}…`;
   feedback.classList.remove("error-text");
   try {
-    const result = await runRoutine(name);
+    const result = await runRoutine(name, undefined, amplitude);
     reportRun(result, `Rutina «${name}»`);
     feedback.textContent = result.status === "done" ? "Rutina terminada."
       : result.status === "stopped" ? "Rutina detenida."
@@ -809,16 +894,20 @@ async function runSavedRoutine(name, feedback, needsStance) {
 function renderRoutinesList() {
   const make = (name, routine, demo) => {
     const needsStance = routine.steps.some((step) => "stance_offset" in step);
+    const scalable = needsStance && name.startsWith("probar_") && !routine.quick_frames;
+    const amplitude = scalable ? el("select", { className: "routine-scale", ariaLabel: `Amplitud de ${name}`, dataset: { needs: "move" } },
+      [1, 2, 3].map((scale) => el("option", { value: String(scale), textContent: `${scale}×` }))) : null;
     const feedback = el("p", { className: "small-note routine-feedback", role: "status",
       textContent: needsStance ? "Requiere postura de apoyo guardada, recuperada y los ocho servos sujetos («Mover patas»)." : "" });
     return el("div", { className: "item" }, [
       el("div", { className: "routine-details" }, [
-        el("strong", { textContent: name }),
+        el("strong", { textContent: demo ? name.replaceAll("_", " ") : name }),
         el("span", { className: "small-note", textContent: ` ${routine.steps.length} pasos${routine.description ? ` · ${routine.description}` : ""}` }),
         feedback
       ]),
       el("span", { className: "item-tools" }, [
-        button("▶", () => runSavedRoutine(name, feedback, needsStance), { small: true, needs: "move" }),
+        amplitude,
+        button(demo ? "▶ Ejecutar" : "▶", () => runSavedRoutine(name, feedback, needsStance, Number(amplitude?.value || 1)), { small: true, needs: "move" }),
         demo ? null : button("Editar", () => editRoutine(name), { small: true }),
         demo ? null : button("Borrar", () => { if (window.confirm(`¿Borrar la rutina «${name}»?`)) act(() => deleteRoutine(name), `Rutina «${name}» borrada.`); }, { small: true })
       ])
@@ -826,7 +915,6 @@ function renderRoutinesList() {
   };
   const entries = Object.entries(robot.routines);
   $("routines-list").replaceChildren(...entries.map(([name, routine]) => make(name, routine, false)));
-  $("demo-routines").replaceChildren(...entries.map(([name, routine]) => make(name, routine, true)));
 }
 
 function editRoutine(name) {
@@ -1029,35 +1117,77 @@ async function runSesame(label, face, intro, cycle, cycles, stay) {
   });
 }
 
+// Una sola ruta de envío para la pestaña Sesame y para Demostración → Coreografías.
+// feedback: nodo opcional donde mostrar el progreso/error junto al botón pulsado.
+async function playSesameMove(move, feedback) {
+  return playSesame(move.label, () => runSesame(move.id, move.face, move.frames, [], 0, move.stay), feedback);
+}
+async function playSesameGait(gait, feedback) {
+  const cycles = clamp(Math.round(num("sesame-cycles")) || 1, 1, 20);
+  return playSesame(gait.label, () => runSesame(gait.id, gait.face, gait.intro, gait.cycle, cycles, false), feedback);
+}
+async function playSesame(label, fn, feedback) {
+  if (feedback) { feedback.textContent = `Enviando «${label}»…`; feedback.classList.remove("error-text"); }
+  const result = await act(fn);
+  reportRun(result, label);
+  if (feedback) {
+    // act() devuelve undefined si la coreografía se rechazó antes de enviar (p. ej. servos sin sujetar).
+    const error = !result || result.status === "error";
+    feedback.textContent = !result ? $("notice").textContent
+      : result.status === "error" ? `«${label}»: ${result.error}`
+      : result.status === "stopped" ? `«${label}» detenido.` : `«${label}» terminado.`;
+    feedback.classList.toggle("error-text", error);
+  }
+  return result;
+}
+
+const CHOREO_ICONS = {
+  stand: "🧍", rest: "😴", wave: "👋", dance: "💃", swim: "🏊", point: "👉", pushup: "💪", bow: "🙇",
+  cute: "🥰", freaky: "🤪", worm: "🐛", shake: "🫨", shrug: "🤷", dead: "💀", crab: "🦀",
+  forward: "⬆️", backward: "⬇️", left: "↺", right: "↻"
+};
+
+// Botón grande de Demostración: icono + nombre; se resalta mientras su coreografía corre.
+function choreoButton(item, label, play) {
+  const node = el("button", { type: "button", className: "choreo-card", dataset: { needs: "move", choreo: item.id } }, [
+    el("span", { className: "choreo-icon", "aria-hidden": "true", textContent: CHOREO_ICONS[item.id] || "✨" }),
+    el("span", { className: "choreo-label", textContent: label })
+  ]);
+  node.addEventListener("click", () => play(item, $("demo-choreo-feedback")));
+  return node;
+}
+
+function renderChoreoPlaying() {
+  const name = robot.run.status === "running" && robot.run.name?.startsWith("sesame_") ? robot.run.name.slice(7) : null;
+  document.querySelectorAll(".choreo-card").forEach((node) => node.classList.toggle("playing", node.dataset.choreo === name));
+}
+
+function renderChoreoSettings() {
+  $("demo-choreo-settings").textContent = `AMPLITUD ${$("sesame-amplitude").value}% · RITMO ${$("sesame-tempo").value}% · ${$("sesame-speed").value}°/S`;
+}
+
 function setupSesame() {
   for (const move of SESAME_MOVES) {
-    $("sesame-moves").append(button(move.label, () => runAction(move.label, () => runSesame(move.id, move.face, move.frames, [], 0, move.stay)), { needs: "move", kind: "chip" }));
+    $("sesame-moves").append(button(move.label, () => playSesameMove(move), { needs: "move", kind: "chip" }));
+    $("demo-choreo-moves").append(choreoButton(move, move.label, playSesameMove));
   }
   for (const gait of SESAME_GAITS) {
-    $("sesame-gaits").append(button(gait.label, () => {
-      const cycles = clamp(Math.round(num("sesame-cycles")) || 1, 1, 20);
-      runAction(gait.label, () => runSesame(gait.id, gait.face, gait.intro, gait.cycle, cycles, false));
-    }, { needs: "move", kind: "chip" }));
+    $("sesame-gaits").append(button(gait.label, () => playSesameGait(gait), { needs: "move", kind: "chip" }));
+    $("demo-choreo-gaits").append(choreoButton(gait, gait.label.replace(/^[^\p{L}]+/u, ""), playSesameGait));
   }
   for (const id of ["sesame-amplitude", "sesame-tempo", "sesame-speed"]) {
     const input = $(id);
     const unit = id === "sesame-speed" ? "°/s" : "%";
     const refresh = () => { $(`${id}-value`).value = `${input.value}${unit}`; };
-    input.addEventListener("input", refresh);
+    input.addEventListener("input", () => { refresh(); renderChoreoSettings(); });
     refresh();
   }
+  renderChoreoSettings();
 }
 
 // ==========================================
-// DEMOSTRACIÓN Y BITÁCORA
+// BITÁCORA
 // ==========================================
-function renderDemoPrograms() {
-  const items = Object.entries(robot.programs).map(([name, program]) => el("div", { className: "item" }, [
-    el("div", {}, [el("strong", { textContent: name }), el("span", { className: "small-note", textContent: program.description ? ` ${program.description}` : "" })]),
-    el("span", { className: "item-tools" }, [button("▶ Ejecutar", () => runSavedProgram(name), { small: true, needs: "move", kind: "button-dark" })])
-  ]));
-  $("demo-programs").replaceChildren(...(items.length ? items : [el("p", { className: "small-note", textContent: "Guarda programas en «Bloques y rutinas» para verlos aquí." })]));
-}
 
 function renderLog() {
   $("log-rows").replaceChildren(...robot.log.map((entry) => el("tr", {}, [
@@ -1074,12 +1204,14 @@ function renderProfileDependent() {
   renderLegsProfile();
   $("sesame-stance").textContent = robot.profile.stance
     ? `Postura de apoyo: ${poseText(robot.profile.stance)}` : "Guarda la postura de apoyo en «Mover patas» antes de usar Sesame.";
+  $("demo-choreo-stance").textContent = robot.profile.stance
+    ? "Postura de apoyo guardada. Sujeta los ocho servos (arriba) y elige una coreografía."
+    : "Falta la postura de apoyo: guárdala en «Mover patas» antes de ejecutar coreografías.";
 }
 
 function renderCatalogs() {
   renderFacesCatalog();
   renderProgramsList();
-  renderDemoPrograms();
   renderRoutinesList();
   renderBlocks();
   updateControls();
@@ -1089,6 +1221,9 @@ function renderLive() {
   renderServoLive();
   renderLegsLive();
   renderRunStatus();
+  renderDemoHoldStatus();
+  renderChoreoPlaying();
+  refreshBlocksMeta();
   updateControls();
 }
 
@@ -1138,6 +1273,7 @@ function setupPwa() {
 
 setupTabs();
 setupSafety();
+setupDemoHold();
 setupServos();
 setupLegs();
 setupBlocks();

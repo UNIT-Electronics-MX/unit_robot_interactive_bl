@@ -35,7 +35,7 @@ arduino-cli board list
 arduino-cli upload --fqbn esp32:esp32:esp32c6 -p /dev/ttyACM0 unit_robot_interactive_bl/firmware/unit_robot_interactive_bl
 ```
 
-Sustituye `/dev/ttyACM0` por el puerto de tu placa. El dispositivo se anuncia como **Spider-BLE**. Al iniciar, el firmware **libera los pulsos** de los servos; el valor lógico de 90° no mide su posición física. Calibra los límites y las posturas antes de mover todo el robot. El botón **Detener** detiene la trayectoria y mantiene el PWM activo; **Liberar servos** apaga los pulsos y deshabilita los motores hasta pulsar **Habilitar servos**. Si se pierde la conexión BLE, el firmware detiene las trayectorias en curso.
+Sustituye `/dev/ttyACM0` por el puerto de tu placa. El dispositivo se anuncia como **Spider-BLE**. Al iniciar, el firmware **libera los pulsos** de los servos; el valor lógico de 90° no mide su posición física. Calibra los límites y las posturas antes de mover todo el robot. En la barra superior, **Conectar/Desconectar** y **Habilitar/Liberar servos** son botones de dos estados. **Detener** detiene la trayectoria y mantiene el PWM activo; **Liberar servos** apaga los pulsos y deshabilita los motores, y el mismo botón pasa a **Habilitar servos**. Si se pierde la conexión BLE, el firmware detiene las trayectorias en curso.
 
 ## Publicar o probar la web
 
@@ -58,17 +58,23 @@ Abre `http://localhost:8000` en Chrome o Edge. Para usarla desde otro dispositiv
 
 La PWA reproduce, sin servidor, las funciones del panel general (`app/` + `server/main.py`). Todo lo que describe al robot vive en la página y se guarda en el navegador: el perfil y las posturas por robot BLE, y las caras, rutinas y programas compartidos entre robots. El firmware solo ejecuta órdenes. `robot-core.js` traduce la lógica de `server/main.py`; `robot-profile.js` contiene los valores por defecto de `firmware/arana_api`, `server/faces.json` y `server/routines.json`.
 
-Las cuatro rutinas pregrabadas de patas usan `stance_offset`: sus grados se suman a la **postura de apoyo de ese robot**. Antes de ejecutarlas, coloca manualmente los ocho servos en una posición estable, con los cuatro pies apoyados, espera a que terminen y pulsa **Mover patas → Guardar postura y activar auto**. Si cambiaste la posición, pulsa **Recuperar postura guardada** y espera a que termine. Sin esta calibración, la página bloquea la rutina antes de enviar comandos BLE; mover servos individuales sigue funcionando. `saludo_ojos` solo cambia la OLED y no mueve motores.
+Las cuatro rutinas pregrabadas de patas usan `stance_offset`: sus grados se suman a la **postura de apoyo de ese robot**. Los 90° no son una postura de pie universal; pueden dejarlo acostado. Antes de ejecutarlas, ajusta los ocho servos uno a uno hasta conseguir una posición estable con los cuatro pies apoyados, espera a que terminen y pulsa **Mover patas → Guardar postura de pie y activar auto**. Si cambiaste la posición, pulsa **Recuperar postura guardada** y espera a que termine. Sin esta calibración, la página bloquea la rutina antes de enviar comandos BLE; mover servos individuales sigue funcionando. `saludo_ojos` solo cambia la OLED y no mueve motores.
+
+Para el Spider BLE medido, **Mover patas → Usar postura medida (sin mover)** guarda R1 71°, R2 77°, R3 40°, R4 46°, L1 90°, L2 90°, L3 44° y L4 40° en el perfil del robot conectado. El botón solo guarda la referencia; no envía órdenes a los motores ni activa recuperación automática. Si el robot ya está en esa postura con los ocho servos sujetos, las rutinas de patas pueden ejecutarse. Si está en otra posición, usa **Recuperar postura guardada** antes de ejecutarlas. **Guardar postura de pie y activar auto** sigue disponible para guardar nuevos ángulos medidos directamente desde el robot.
+
+Las cuatro pruebas de patas permiten elegir 1× (5° de giro y 10° de elevación), 2× (10°/20°) o 3× (15°/30°) antes de pulsar ▶. La página verifica toda la secuencia contra el perfil del servo antes de enviar el primer comando. Esto cambia el recorrido de la prueba, no amplía los límites físicos del motor.
 
 | Pestaña | Qué hace | Equivale a |
 | --- | --- | --- |
-| Demostración | Caras de un toque, programas y rutinas guardados con su botón de ejecutar | Demostración |
+| Demostración | Sujeción de los ocho servos (todo o nada), coreografías Sesame y caras de un toque | Demostración |
 | Servomotores | Mover cada servo, sujetar, liberar o activar; mover los 8, centrar, par en espejo; velocidad general por segundos para 90°; **Perfil del robot** (rango, inversión y velocidad) | Servomotores |
 | Mover patas | Adelante/Atrás/Arriba/Abajo por pata; postura de apoyo (guardar, recuperar, automática); recorrido y sentido de avance de R1, R2, L1, L2; elevación por pata con prueba y confirmación visual; paso de caminata (1 o 3 ciclos); postura acostada al iniciar con `POSE_HOLD` | Mover patas |
 | Bloques y rutinas | Programas de bloques (servo, mover pata, paso de pata, caminata, cara, esperar, volver al inicio, rutina o programa guardado) con 1–3 ciclos, comprobación de rango y conversión de cuatro pasos en caminata; probador rápido de secuencias; rutinas en JSON | Editar bloques |
 | Caritas | Editor de caras con vista previa OLED 128×64, ajustes por ojo, transición y duración; texto en pantalla; pantalla de estado | Editar caritas |
 | Sesame | 15 poses y 4 marchas del robot Sesame sobre la postura de apoyo | — |
 | Bitácora | Últimas 300 órdenes enviadas con su origen | Bitácora |
+
+En **Demostración → Sujeción**, **Sujetar los 8** sujeta todos los servos a la vez en los ángulos reportados. El botón habilita los motores que estén desactivados y espera una nueva notificación del firmware que confirme el PWM antes de indicar que están sujetos. Tras un reinicio, comprueba primero que esos ángulos coincidan con la posición física: el firmware no mide la postura real. El bloque **Caminata** comienza con 3° de avance y usa las elevaciones guardadas; si aún no hay calibración, propone 5°. Para ejecutarlo, sujeta los ocho servos o inicia el programa con ocho bloques **Servo** que definan una postura completa.
 
 Diferencias con el proyecto general:
 

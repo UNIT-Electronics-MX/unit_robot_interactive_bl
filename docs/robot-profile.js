@@ -18,6 +18,9 @@ const DEFAULT_SERVO_PROFILE = {
   L4: { min: 0, max: 180, invert: true, speed: 60 }
 };
 
+// Postura de pie medida en este Spider BLE; se carga solo al pulsar el botón de la página.
+const MEASURED_STANDING_POSE = { R1: 71, R2: 77, R3: 40, R4: 46, L1: 90, L2: 90, L3: 44, L4: 40 };
+
 // Patas: motor de giro (avance), motor de elevación y sentido de avance por defecto
 // (server/main.py WALK_SWING). La elevación siempre sube con grados positivos.
 const LEGS = {
