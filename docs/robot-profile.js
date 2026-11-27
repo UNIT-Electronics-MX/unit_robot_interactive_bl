@@ -6,20 +6,22 @@
 
 const SERVOS = ["R1", "R2", "R3", "R4", "L1", "L2", "L3", "L4"];
 
-// Tabla de fábrica del firmware: caderas 0–160°, pies 0–180°, R3 y L4 invertidos, 60 °/s.
+// Rangos calibrados de este Spider: caderas R1/L1 20–128°, R2/L2 30–128°;
+// pies 0–180°. R3 y L4 invertidos, 90 °/s (1,0 s por 90°).
 const DEFAULT_SERVO_PROFILE = {
-  R1: { min: 0, max: 160, invert: false, speed: 60 },
-  R2: { min: 0, max: 160, invert: false, speed: 60 },
-  R3: { min: 0, max: 180, invert: true, speed: 60 },
-  R4: { min: 0, max: 180, invert: false, speed: 60 },
-  L1: { min: 0, max: 160, invert: false, speed: 60 },
-  L2: { min: 0, max: 160, invert: false, speed: 60 },
-  L3: { min: 0, max: 180, invert: false, speed: 60 },
-  L4: { min: 0, max: 180, invert: true, speed: 60 }
+  R1: { min: 20, max: 128, invert: false, speed: 90 },
+  R2: { min: 30, max: 128, invert: false, speed: 90 },
+  R3: { min: 0, max: 180, invert: true, speed: 90 },
+  R4: { min: 0, max: 180, invert: false, speed: 90 },
+  L1: { min: 20, max: 128, invert: false, speed: 90 },
+  L2: { min: 30, max: 128, invert: false, speed: 90 },
+  L3: { min: 0, max: 180, invert: false, speed: 90 },
+  L4: { min: 0, max: 180, invert: true, speed: 90 }
 };
 
-// Postura de pie medida en este Spider BLE; se carga solo al pulsar el botón de la página.
-const MEASURED_STANDING_POSE = { R1: 71, R2: 77, R3: 40, R4: 46, L1: 90, L2: 90, L3: 44, L4: 40 };
+// Posturas calibradas para este Spider BLE.
+const MEASURED_STANDING_POSE = { R1: 90, R2: 90, R3: 70, R4: 70, L1: 90, L2: 90, L3: 70, L4: 70 };
+const MEASURED_REST_POSE = { R1: 90, R2: 90, R3: 150, R4: 150, L1: 90, L2: 90, L3: 150, L4: 150 };
 
 // Patas: motor de giro (avance), motor de elevación y sentido de avance por defecto
 // (server/main.py WALK_SWING). La elevación siempre sube con grados positivos.

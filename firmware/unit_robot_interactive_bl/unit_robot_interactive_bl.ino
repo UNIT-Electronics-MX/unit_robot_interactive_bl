@@ -20,7 +20,7 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
-#define FW_VERSION "2.6-BLE"
+#define FW_VERSION "2.7-BLE"
 
 // ---- Opciones ----
 #define ENABLE_OLED       1     // 0 = sin pantalla
@@ -97,15 +97,16 @@ struct ServoConfig {
   bool signalActive;
 };
 
-// R3 y L4 invertidos. Posicion inicial logica de 90 grados.
+// Rangos calibrados de este Spider; R3 y L4 invertidos.
+// Posicion inicial logica de 90 grados.
 ServoConfig servos[NUM_SERVOS] = {
-  {"R1", 0, 0, 160, 90, 90, 60, false, true, false, false},
-  {"R2", 1, 0, 160, 90, 90, 60, false, true, false, false},
+  {"R1", 0, 20, 128, 90, 90, 60, false, true, false, false},
+  {"R2", 1, 30, 128, 90, 90, 60, false, true, false, false},
   {"R3", 2, 0, 180, 90, 90, 60, true,  true, false, false},
   {"R4", 3, 0, 180, 90, 90, 60, false, true, false, false},
 
-  {"L1", 4, 0, 160, 90, 90, 60, false, true, false, false},
-  {"L2", 5, 0, 160, 90, 90, 60, false, true, false, false},
+  {"L1", 4, 20, 128, 90, 90, 60, false, true, false, false},
+  {"L2", 5, 30, 128, 90, 90, 60, false, true, false, false},
   {"L3", 6, 0, 180, 90, 90, 60, false, true, false, false},
   {"L4", 7, 0, 180, 90, 90, 60, true,  true, false, false}
 };
@@ -669,6 +670,12 @@ void sendBleServo(uint8_t index) {
 
 void processBleCommand(char* command) {
   strlcpy(lastCmd, command, sizeof(lastCmd));
+  if (strncmp(command, "PING ", 5) == 0) {
+    char reply[20];
+    snprintf(reply, sizeof(reply), "A,%.12s", command + 5);
+    notifyBle(reply);
+    return;
+  }
   if (strcmp(command, "STATUS") == 0) {
     sendBleHeader();
   } else if (strcmp(command, "RELEASE") == 0) {

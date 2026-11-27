@@ -80,8 +80,9 @@ function onRobot(listener) {
 function defaultRobotProfile() {
   return {
     servos: clone(DEFAULT_SERVO_PROFILE),
-    stance: null, walkLifts: null, walkSwing: null, startupPose: null,
-    autoStance: false, autoStartup: false
+    stance: clone(MEASURED_STANDING_POSE), walkLifts: null, walkSwing: null,
+    startupPose: clone(MEASURED_REST_POSE),
+    autoStance: true, autoStartup: false
   };
 }
 
@@ -91,7 +92,23 @@ function loadRobot(id) {
   const base = defaultRobotProfile();
   robot.id = id;
   robot.profile = { ...base, ...(saved || {}) };
-  robot.profile.servos = Object.fromEntries(SERVOS.map((n) => [n, { ...DEFAULT_SERVO_PROFILE[n], ...(saved?.servos?.[n] || {}) }]));
+  robot.profile.servos = Object.fromEntries(SERVOS.map((n) => {
+    const hard = DEFAULT_SERVO_PROFILE[n];
+    const prior = saved?.servos?.[n] || {};
+    const min = Math.max(hard.min, isNum(prior.min) ? prior.min : hard.min);
+    const max = Math.min(hard.max, isNum(prior.max) ? prior.max : hard.max);
+    return [n, { ...hard, ...prior,
+      min: min < max ? min : hard.min,
+      max: min < max ? max : hard.max }];
+  }));
+  // Perfiles anteriores guardaban stance:null y autoStance:false, aunque este
+  // robot ya tiene una postura calibrada. Respetar posturas personalizadas.
+  const legacyMeasured = { R1: 71, R2: 77, R3: 40, R4: 46, L1: 90, L2: 90, L3: 44, L4: 40 };
+  if (!saved?.stance || SERVOS.every((n) => saved.stance[n] === legacyMeasured[n])) {
+    robot.profile.stance = clone(MEASURED_STANDING_POSE);
+    if (!saved?.autoStartup) robot.profile.autoStance = true;
+  }
+  if (!saved?.startupPose) robot.profile.startupPose = clone(MEASURED_REST_POSE);
   storage.set(KEY_LAST_ROBOT, id);
   saveRobot();
 }
@@ -459,19 +476,44 @@ function saveServoProfile(next) {
 // Equivale al reinicio del proyecto general: perfil y, si se pidió, postura guardada.
 async function recoverOnConnect() {
   const holding = SERVOS.filter(held);
+  const p = robot.profile;
+  const pose = p.autoStartup && validPose(p.startupPose) ? p.startupPose
+    : p.autoStance && validPose(p.stance) ? p.stance : null;
   if (holding.length) {
     await applySpeeds("inicio");
-    return { applied: false, holding };
+    if (pose && holding.length < SERVOS.length && holding.every((n) =>
+      Math.abs(robot.telemetry[n].cur - pose[n]) <= 1 && settled(n))) {
+      if (!robot.pca) fail("PCA9685 no detectado; revisa alimentación y cableado.");
+      if (SERVOS.some((n) => !robot.telemetry[n]?.en)) await actArm("inicio");
+      const issuedAt = now();
+      await actPose(pose, "inicio", true);
+      await send("STATUS", "inicio");
+      await waitForHeld(SERVOS, issuedAt);
+      for (const n of SERVOS) {
+        const t = robot.telemetry[n];
+        if (Math.abs(t.cur - pose[n]) > 1 || Math.abs(t.tgt - pose[n]) > 1) {
+          fail(`${n} no confirmó la postura calibrada; revisa el robot antes de iniciar rutinas.`);
+        }
+      }
+      return { applied: false, restored: pose === p.startupPose ? "startup" : "stance" };
+    }
+    return { applied: false, holding, readyForRoutines: atStance() };
   }
+  if (!robot.pca) fail("PCA9685 no detectado; revisa alimentación y cableado.");
   await applyProfile("inicio");
-  const p = robot.profile;
-  if (p.autoStartup && validPose(p.startupPose)) {
-    await actPose(p.startupPose, "inicio", true);
-    return { applied: true, restored: "startup" };
-  }
-  if (p.autoStance && validPose(p.stance)) {
-    await actPose(p.stance, "inicio");
-    return { applied: true, restored: "stance" };
+  if (pose) {
+    if (SERVOS.some((n) => !robot.telemetry[n]?.en)) await actArm("inicio");
+    const issuedAt = now();
+    await actPose(pose, "inicio", true);
+    await send("STATUS", "inicio");
+    await waitForHeld(SERVOS, issuedAt);
+    for (const n of SERVOS) {
+      const t = robot.telemetry[n];
+      if (Math.abs(t.cur - pose[n]) > 1 || Math.abs(t.tgt - pose[n]) > 1) {
+        fail(`${n} no confirmó la postura calibrada; revisa el robot antes de iniciar rutinas.`);
+      }
+    }
+    return { applied: true, restored: pose === p.startupPose ? "startup" : "stance" };
   }
   return { applied: true, restored: null };
 }
@@ -612,13 +654,29 @@ function useMeasuredStandingPose() {
   }
   robot.profile.stance = clone(MEASURED_STANDING_POSE);
   robot.profile.walkLifts = null;
+  robot.profile.autoStance = true;
+  robot.profile.autoStartup = false;
   saveRobot();
   return robot.profile.stance;
 }
 async function restoreStance() {
   const stance = getStance();
-  for (const n of SERVOS) if (robot.telemetry[n] && !robot.telemetry[n].en) fail(`${n} está deshabilitado; pulsa Habilitar servos.`);
-  await actPose(stance, "postura");
+  if (!robot.pca) fail("PCA9685 no detectado; revisa alimentación y cableado.");
+  const needsHold = SERVOS.some((n) => !held(n));
+  if (SERVOS.some((n) => robot.telemetry[n] && !robot.telemetry[n].en)) await actArm("postura");
+  if (needsHold) {
+    const issuedAt = now();
+    await actPose(stance, "postura", true);
+    await send("STATUS", "postura");
+    await waitForHeld(SERVOS, issuedAt);
+  } else {
+    await actPose(stance, "postura");
+  }
+}
+async function restPose() {
+  requireAllReady("acostarse");
+  if (!validPose(MEASURED_REST_POSE)) fail("La postura de descanso no cabe en los rangos actuales.");
+  await actPose(MEASURED_REST_POSE, "descanso");
 }
 function setAutoStance(enabled) {
   robot.profile.autoStance = Boolean(enabled);
@@ -705,15 +763,14 @@ function saveWalkLifts(lifts) {
 }
 
 // build_walk_steps: un ciclo corto desde la postura de apoyo; nunca recorta un ángulo.
-function buildWalkSteps(stride, lift = 5) {
+function buildWalkSteps(stride, lift = 10, direction = 1) {
   if (robot.run.status === "running") fail("Ya hay una rutina en marcha; deténla primero.");
   if (!allReported()) fail("La caminata necesita los ocho servomotores.");
   if (!isNum(stride) || stride < 1 || stride > 180) fail("El avance debe ser de 1–180°.");
+  if (![1, -1].includes(direction)) fail("El sentido de caminata debe ser adelante o atrás.");
   const lifts = robot.profile.walkLifts;
-  if (lifts) {
-    getStance(true);
-    if (!LIFT_SERVOS.every((n) => n in lifts)) fail("Vuelve a calibrar la elevación de las cuatro patas.");
-  }
+  if (lifts && !LIFT_SERVOS.every((n) => Number.isInteger(lifts[n]) && lifts[n] > 0)) fail("Vuelve a calibrar la elevación de las cuatro patas.");
+  getStance(true);
   const base = {};
   for (const n of SERVOS) {
     if (!held(n)) fail(`${n} debe estar activo y sujeto antes de caminar.`);
@@ -726,7 +783,7 @@ function buildWalkSteps(stride, lift = 5) {
       const spec = walkSwingSpec(n);
       low = spec.min;
       high = spec.max;
-      valid = low <= value && value <= high && low <= value + spec.forward * stride && value + spec.forward * stride <= high;
+      valid = low <= value && value <= high && low <= value + spec.forward * direction * stride && value + spec.forward * direction * stride <= high;
     } else {
       const legLift = lifts ? lifts[n] : lift;
       valid = isNum(legLift) && legLift >= 1 && legLift <= 180 && low <= value && value + legLift <= high;
@@ -738,17 +795,17 @@ function buildWalkSteps(stride, lift = 5) {
   const steps = [];
   const add = (changes) => {
     Object.assign(pose, changes);
-    steps.push({ pose_all: SERVOS.map((n) => pose[n]), wait_done: true });
+    steps.push({ pose_all: SERVOS.map((n) => pose[n]), wait_done: true, _settleMs: 40 });
   };
   // Tres patas apoyadas mientras la cuarta se levanta y se coloca adelante.
   for (const swing of WALK_LEG_ORDER) {
     const liftServo = LEGS[swing].lift;
     const legLift = lifts ? lifts[liftServo] : lift;
     add({ [liftServo]: base[liftServo] + legLift });
-    add({ [swing]: base[swing] + forwardSign(swing) * stride });
+    add({ [swing]: base[swing] + forwardSign(swing) * direction * stride });
     add({ [liftServo]: base[liftServo] });
   }
-  // Con las cuatro patas apoyadas y adelantadas, el giro de regreso empuja el cuerpo.
+  // Con las cuatro patas apoyadas, el giro de regreso empuja el cuerpo.
   add(Object.fromEntries(SWING_SERVOS.map((n) => [n, base[n]])));
   return steps;
 }
@@ -857,7 +914,7 @@ async function sleepCancellable(ms, token) {
   }
   guard(token);
 }
-async function waitMotionDone(token, timeoutMs = 10000) {
+async function waitMotionDone(token, timeoutMs = 10000, settleMs = 120) {
   const deadline = now() + timeoutMs;
   while (now() < deadline) {
     guard(token);
@@ -866,7 +923,7 @@ async function waitMotionDone(token, timeoutMs = 10000) {
     await sleep(Math.min(remaining + 20, 200));
   }
   // Margen para el bucle de 20 ms del firmware y la latencia BLE.
-  await sleepCancellable(120, token);
+  await sleepCancellable(settleMs, token);
 }
 function poseReached(desired) {
   return Object.entries(desired).every(([n, v]) => held(n) && Math.abs(target(n) - v) <= 0.1 && Math.abs(current(n) - v) <= 0.1);
@@ -930,7 +987,7 @@ async function execStep(s, token) {
     if (!poseReached({ [n]: v })) await actMove(n, v, src);
   }
   for (const n of s.release || []) { guard(token); await actVerb("FREE", n, src); }
-  if (s.wait_done) await waitMotionDone(token);
+  if (s.wait_done) await waitMotionDone(token, 10000, s._settleMs ?? 120);
   if ("wait" in s) await sleepCancellable(s.wait * 1000, token);
 }
 

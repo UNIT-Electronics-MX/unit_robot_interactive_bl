@@ -10,10 +10,10 @@
   <link rel="icon" href="./icons/spider.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="./icons/spider-192.png">
   <link rel="stylesheet" href="./styles.css?v=17">
-  <script src="./robot-profile.js?v=9" defer></script>
+  <script src="./robot-profile.js?v=12" defer></script>
   <script src="./sesame-moves.js?v=13" defer></script>
-  <script src="./robot-core.js?v=12" defer></script>
-  <script src="./app.js?v=17" defer></script>
+  <script src="./robot-core.js?v=16" defer></script>
+  <script src="./app.js?v=24" defer></script>
   <title>Spider BLE · Control del robot</title>
 </head>
 <body>
@@ -63,7 +63,7 @@
     <section id="tab-demo" class="tab-page">
       <section class="panel demo-hold" aria-labelledby="demo-hold-title">
         <div><p class="section-kicker">ANTES DE MOVER</p><h2 id="demo-hold-title">Sujeción</h2>
-          <p class="section-intro">Sujeta los ocho servos a la vez en el ángulo que reportan. Tras reiniciar, comprueba que coinciden con la posición física.</p></div>
+          <p class="section-intro">Al conectar, la postura calibrada sujeta los ocho servos automáticamente. Usa este botón solo si interrumpiste esa sujeción; el firmware no mide la posición física.</p></div>
         <div class="demo-hold-controls">
           <button id="demo-hold-all" class="button button-dark" type="button">Sujetar los 8</button>
           <div class="hold-meter" aria-hidden="true"><span id="demo-hold-bar"></span></div>
@@ -103,6 +103,7 @@
             <p id="all-range" class="small-note"></p>
             <div class="button-row"><button id="all-button" class="button button-dark" type="button" data-needs="move">Mover los 8</button>
               <button id="center-button" class="button button-secondary" type="button" data-needs="move">Centrar (90°)</button></div>
+            <p class="small-note">Centrar coloca también los pies a 90°. Para volver a la postura de pie calibrada (pies a 70°), usa «Recuperar postura guardada» en Mover patas.</p>
             <div class="mirror-block">
               <label for="mirror-pair">Par en espejo</label>
               <div class="inline-fields"><select id="mirror-pair"><option value="1">R1 + L1</option><option value="2">R2 + L2</option><option value="3">R3 + L3</option><option value="4">R4 + L4</option></select><input id="mirror-angle" type="number" value="90" inputmode="numeric" aria-label="Ángulo del par"></div>
@@ -112,9 +113,15 @@
           <section class="panel">
             <p class="section-kicker">VELOCIDAD</p><h2>Velocidad general</h2>
             <p class="section-intro">Indica cuántos segundos debe tardar un recorrido de 90°.</p>
-            <div class="inline-fields"><input id="speed-time" type="number" min="0.5" max="90" step="0.1" value="1.5" aria-label="Segundos para 90 grados"><span class="unit">s por 90°</span></div>
+            <div class="inline-fields"><input id="speed-time" type="number" min="0.5" max="90" step="0.1" value="1.0" aria-label="Segundos para 90 grados"><span class="unit">s por 90°</span></div>
             <p id="speed-time-info" class="small-note"></p>
             <button id="speed-time-button" class="button button-secondary full" type="button" data-needs="conn">Aplicar a los 8</button>
+          </section>
+          <section class="panel">
+            <p class="section-kicker">DIAGNÓSTICO</p><h2>Respuesta del robot</h2>
+            <p class="section-intro">Mide el acuse BLE y la respuesta del ESP32 a una orden de prueba. No mueve los motores.</p>
+            <button id="latency-test" class="button button-secondary full" type="button" data-needs="conn">Medir respuesta</button>
+            <p id="latency-result" class="small-note" role="status"></p>
           </section>
         </aside>
       </div>
@@ -125,7 +132,7 @@
         <div class="button-row">
           <button id="profile-save" class="button button-dark" type="button">Guardar perfil</button>
           <button id="profile-send" class="button button-secondary" type="button" data-needs="conn">Enviar perfil al robot</button>
-          <button id="profile-reset" class="button button-secondary" type="button">Valores de fábrica</button>
+          <button id="profile-reset" class="button button-secondary" type="button">Cargar perfil calibrado</button>
         </div>
       </section>
     </section>
@@ -141,13 +148,14 @@
       <div class="two-col">
         <section class="panel">
           <p class="section-kicker">PASO 1</p><h2>Postura de apoyo</h2>
-          <p class="section-intro">90° no es una postura de pie universal: en tu montaje puede ser acostado. Ajusta los ocho motores, uno a uno, hasta que los cuatro pies apoyen el cuerpo; espera a que terminen y guarda esos ángulos como postura de apoyo. Las rutinas pregrabadas de patas parten de esa postura. Al guardarla se borran las elevaciones calibradas.</p>
-          <p class="small-note">Postura de pie medida: R1 71° · R2 77° · R3 40° · R4 46° · L1 90° · L2 90° · L3 44° · L4 40°.</p>
+          <p class="section-intro">La postura de pie calibrada ya viene cargada: caderas a 90° y pies a 70°. Al conectar, la página aplica esa postura y sujeta los ocho servos antes de habilitar las rutinas. Si cambias la calibración, puedes guardar una postura personalizada.</p>
+          <p class="small-note">Postura de pie medida: R1 90° · R2 90° · R3 70° · R4 70° · L1 90° · L2 90° · L3 70° · L4 70°.</p>
           <p id="stance-info" class="pose-box"></p>
           <div class="button-row">
             <button id="stance-save" class="button button-dark" type="button" data-needs="conn">Guardar postura de pie y activar auto</button>
             <button id="stance-measured" class="button button-secondary" type="button" data-needs="conn">Usar postura medida (sin mover)</button>
             <button id="stance-restore" class="button button-secondary" type="button" data-needs="move">Recuperar postura guardada</button>
+            <button id="stance-rest" class="button button-secondary" type="button" data-needs="move">Descansar (pies a 150°)</button>
           </div>
           <label class="check"><input id="stance-auto" type="checkbox"> Recuperar automáticamente al conectar tras un reinicio</label>
         </section>
@@ -161,15 +169,15 @@
       <div class="two-col">
         <section class="panel">
           <p class="section-kicker">PASO 3</p><h2>Elevación por pata</h2>
-          <p class="section-intro">Desde la postura de apoyo, <b>Probar</b> levanta solo esa pata y la devuelve. Si el pie se despega, marca <b>Sí se despegó</b>. Guarda las cuatro.</p>
+          <p class="section-intro">La postura de pie ya está calibrada. Para que cada pie se despegue lo suficiente, prueba su elevación y guarda los cuatro valores que funcionen. Mientras no haya elevaciones guardadas, la caminata usa 10° de prueba por pata.</p>
           <div id="lift-rows" class="lift-rows"></div>
           <button id="lifts-save" class="button button-dark" type="button" data-needs="conn">Guardar elevaciones</button>
           <p id="lifts-info" class="small-note"></p>
         </section>
         <section class="panel">
           <p class="section-kicker">PASO 4</p><h2>Paso de caminata</h2>
-          <p class="section-intro">Levanta y adelanta una pata cada vez (R1, L2, R2, L1) con las otras tres apoyadas; luego gira las cuatro hacia atrás para empujar el cuerpo. Empieza con 3°–5°.</p>
-          <div class="inline-fields"><label for="walk-stride" class="unit">Avance</label><input id="walk-stride" type="number" min="1" max="180" value="4"><span class="unit">°</span></div>
+          <p class="section-intro">Levanta y adelanta una pata cada vez (R1, L2, R2, L1) con las otras tres apoyadas; luego gira las cuatro hacia atrás para empujar el cuerpo. El avance inicial es 12°; puedes ajustarlo según la tracción del robot.</p>
+          <div class="inline-fields"><label for="walk-stride" class="unit">Avance</label><input id="walk-stride" type="number" min="1" max="180" value="12"><span class="unit">°</span></div>
           <ul id="walk-checks" class="checklist"></ul>
           <div class="button-row">
             <button id="walk-one" class="button button-dark" type="button" data-needs="move">Un paso</button>
@@ -179,7 +187,7 @@
       </div>
       <section class="panel">
         <p class="section-kicker">ARRANQUE</p><h2>Postura acostada al iniciar</h2>
-        <p class="section-intro">En <b>Bloques</b>, crea o carga un programa que empiece con ocho bloques <b>Servo</b> (uno por motor) con los ángulos de acostado calibrados. Al guardarla se envía <code>POSE_HOLD</code>, que activa los pulsos directamente en esos ángulos sin pasar por los 90° lógicos. Excluye la recuperación automática de la postura de apoyo.</p>
+        <p class="section-intro">La postura acostada inicial viene cargada: caderas a 90° y pies a 150°. Para cambiarla, crea en <b>Bloques</b> un programa que empiece con ocho bloques <b>Servo</b>, uno por motor, y pulsa <b>Guardar y aplicar</b>. Si activas el inicio acostado automático, se aplicará al conectar en lugar de la postura de pie.</p>
         <p id="startup-info" class="pose-box"></p>
         <div class="button-row">
           <button id="startup-save" class="button button-dark" type="button" data-needs="conn">Guardar y aplicar inicio acostado</button>
@@ -289,16 +297,16 @@
     <section id="tab-sesame" class="tab-page" hidden>
       <section class="panel sesame-panel">
         <div class="section-heading"><div><p class="section-kicker">COREOGRAFÍAS</p><h2>Movimientos Sesame</h2></div><span class="section-tag">19 MOVIMIENTOS</span></div>
-        <p class="section-intro">Secuencias del robot abierto <a href="https://github.com/dorianborian/sesame-robot" target="_blank" rel="noopener">Sesame</a> (Dorian Todd, Apache-2.0). Cada cuadro se convierte en cuánto avanza la cadera y cuánto se levanta el pie respecto a tu <b>postura de apoyo</b> (Mover patas), con el sentido de avance guardado y dentro del rango de cada motor. Empieza con poca amplitud y sujeta al robot la primera vez.</p>
+        <p class="section-intro">Secuencias del robot abierto <a href="https://github.com/dorianborian/sesame-robot" target="_blank" rel="noopener">Sesame</a> (Dorian Todd, Apache-2.0). Los gestos y giros se adaptan a tu postura de apoyo. Adelante y Atrás usan el paso calibrado en Mover patas para mantener la dirección. Ajusta la amplitud según la tracción del robot.</p>
         <div class="sesame-grid">
           <div>
             <p id="sesame-stance" class="pose-box"></p>
-            <div class="range-head"><label for="sesame-amplitude">Amplitud</label><output id="sesame-amplitude-value" for="sesame-amplitude">40%</output></div>
-            <input id="sesame-amplitude" class="range" type="range" min="10" max="100" step="5" value="40">
+            <div class="range-head"><label for="sesame-amplitude">Amplitud</label><output id="sesame-amplitude-value" for="sesame-amplitude">75%</output></div>
+            <input id="sesame-amplitude" class="range" type="range" min="10" max="100" step="5" value="75">
             <div class="range-head"><label for="sesame-tempo">Ritmo</label><output id="sesame-tempo-value" for="sesame-tempo">100%</output></div>
             <input id="sesame-tempo" class="range" type="range" min="50" max="150" step="10" value="100">
-            <div class="range-head"><label for="sesame-speed">Velocidad de servos</label><output id="sesame-speed-value" for="sesame-speed">150°/s</output></div>
-            <input id="sesame-speed" class="range" type="range" min="40" max="180" step="10" value="150">
+            <div class="range-head"><label for="sesame-speed">Velocidad de servos</label><output id="sesame-speed-value" for="sesame-speed">90°/s</output></div>
+            <input id="sesame-speed" class="range" type="range" min="40" max="180" step="10" value="90">
           </div>
           <div>
             <h3>Poses y gestos</h3>

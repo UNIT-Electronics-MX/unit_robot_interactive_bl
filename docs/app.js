@@ -18,6 +18,8 @@ let recoveryInProgress = false;
 let renderQueued = false;
 let holdPending = false;
 let connecting = false;
+let pendingProbe = null;
+let nextProbeId = 0;
 const servosArmed = () => SERVOS.some((n) => robot.telemetry[n]?.en);
 const cards = new Map();
 
@@ -67,7 +69,7 @@ function reportRun(result, label) {
   else if (result.status === "stopped") setNotice(`${label}: detenido.`);
   else if (result.status === "error") setNotice(`${label}: ${result.error}`, true);
 }
-const runAction = (label, fn) => act(fn).then((result) => reportRun(result, label));
+const runAction = (label, fn) => act(fn).then((result) => { reportRun(result, label); return result; });
 
 const num = (id) => Number($(id).value);
 const shown = (value) => (value === null || value === undefined ? "—" : `${round1(value)}°`);
@@ -101,6 +103,9 @@ function updateControls() {
   const allHeld = connected && SERVOS.every(held);
   $("demo-hold-all").disabled = !canHold || allHeld;
   $("demo-hold-all").textContent = holdPending ? "Sujetando…" : allHeld ? "✓ Los 8 sujetos" : "Sujetar los 8";
+  const walkReady = canMove && atStance();
+  $("walk-one").disabled = !walkReady;
+  $("walk-three").disabled = !walkReady;
   $("connection-dot").classList.toggle("connected", connected);
   $("connection-label").textContent = connected ? `${device.name || "Spider-BLE"} conectado` : "Sin conectar";
   $("hardware-label").textContent = connected
@@ -135,7 +140,11 @@ async function writeCommand(text) {
 
 function handleStatus(event) {
   const parts = new TextDecoder().decode(event.target.value).trim().split(",");
-  if (parts[0] === "P" && parts.length >= 4) {
+  if (parts[0] === "A" && pendingProbe?.id === parts[1]) {
+    const probe = pendingProbe;
+    pendingProbe = null;
+    probe.resolve(performance.now());
+  } else if (parts[0] === "P" && parts.length >= 4) {
     onHeader(parts[1] === "1", parts[2] === "1", parts[3]);
     if (!robot.pca) setNotice("PCA9685 no detectado. Revisa alimentación y cableado I²C antes de mover el robot.", true);
   } else if (parts[0] === "S" && parts.length >= 6 && SERVOS.includes(parts[1])) {
@@ -147,17 +156,46 @@ function handleStatus(event) {
   }
 }
 
+async function measureRobotResponse() {
+  if (!isConnected()) throw new Error("Conecta el robot antes de medir.");
+  if (pendingProbe) throw new Error("Ya hay una medición en curso.");
+  const id = String(++nextProbeId);
+  const startedAt = performance.now();
+  let resolveReply;
+  const reply = new Promise((resolve) => { resolveReply = resolve; });
+  pendingProbe = { id, resolve: resolveReply };
+  const timeout = setTimeout(() => {
+    if (pendingProbe?.id === id) {
+      pendingProbe = null;
+      resolveReply(null);
+    }
+  }, 5000);
+  try {
+    if (!(await writeCommand(`PING ${id}`))) throw new Error("Falló la escritura Bluetooth.");
+    const bleMs = Math.round(performance.now() - startedAt);
+    const processedAt = await reply;
+    if (processedAt === null) throw new Error("El ESP32 no respondió al PING. Comprueba que tenga el firmware 2.7-BLE.");
+    return { bleMs, processMs: Math.round(processedAt - startedAt) };
+  } finally {
+    clearTimeout(timeout);
+    if (pendingProbe?.id === id) pendingProbe = null;
+  }
+}
+
 async function recover() {
   recoveryInProgress = true;
   updateControls();
   try {
     const result = await act(() => recoverOnConnect());
     if (!result) return;
-    if (!result.applied) {
-      setNotice(`Motores sujetos (${result.holding.join(", ")}): se envió solo la velocidad. Pulsa «Enviar perfil al robot» con la araña apoyada para aplicar rangos e inversión.`, true);
-    } else if (result.restored === "startup") setNotice("Perfil enviado y postura acostada aplicada con POSE_HOLD.");
-    else if (result.restored === "stance") setNotice("Perfil enviado; recuperando la postura de apoyo guardada.");
-    else setNotice("Perfil de la página enviado al robot. Los motores siguen libres hasta el primer movimiento.");
+    if (result.restored === "startup") setNotice("Postura acostada calibrada aplicada; ocho servos sujetos.");
+    else if (result.restored === "stance") setNotice("Postura de pie calibrada aplicada; ocho servos sujetos y listos para rutinas.");
+    else if (result.readyForRoutines) setNotice("Los ocho servos ya estaban sujetos y en postura de pie. Robot listo para rutinas.");
+    else if (!result.applied && result.holding.length === SERVOS.length) {
+      setNotice("Los ocho servos ya están sujetos. Para ejecutar rutinas de patas, pulsa «Recuperar postura guardada» en Mover patas.");
+    } else if (!result.applied) {
+      setNotice(`${result.holding.length}/8 servos sujetos. Pulsa «Recuperar postura guardada» en Mover patas para completar la sujeción.`);
+    } else setNotice("Perfil de la página enviado al robot. Los motores siguen libres hasta el primer movimiento.");
   } finally {
     recoveryInProgress = false;
     updateControls();
@@ -166,6 +204,10 @@ async function recover() {
 }
 
 function disconnected() {
+  if (pendingProbe) {
+    pendingProbe.resolve(null);
+    pendingProbe = null;
+  }
   cancelRun();
   robot.transport = null;
   commandCharacteristic = null;
@@ -350,6 +392,7 @@ function renderServoRanges() {
   $("mirror-angle").min = String(cfg(right).min);
   $("mirror-angle").max = String(cfg(right).max);
   const speeds = new Set(SERVOS.map((n) => cfg(n).speed));
+  if (speeds.size === 1) $("speed-time").value = String(round1(90 / [...speeds][0]));
   $("speed-time-info").textContent = speeds.size === 1
     ? `Ahora: ${[...speeds][0]} °/s ≈ ${round1(90 / [...speeds][0])} s por 90°.` : "Los motores tienen velocidades distintas.";
 }
@@ -399,6 +442,15 @@ function readProfileTable() {
 
 function setupServos() {
   renderServoCards();
+  $("latency-test").addEventListener("click", () => {
+    $("latency-result").textContent = "Midiendo…";
+    act(async () => {
+      const result = await measureRobotResponse();
+      $("latency-result").textContent = `Acuse BLE: ${result.bleMs} ms · respuesta ESP32: ${result.processMs} ms`;
+    }).then(() => {
+      if ($("latency-result").textContent === "Midiendo…") $("latency-result").textContent = "No se obtuvo una medición.";
+    });
+  });
   $("all-angle").addEventListener("input", (event) => { $("all-angle-value").value = `${event.target.value}°`; });
   $("all-button").addEventListener("click", () => act(() => actAll(num("all-angle")), `Ocho servos hacia ${$("all-angle").value}°.`));
   $("center-button").addEventListener("click", () => act(() => actCenter(), "Ocho servos hacia 90° (dentro de su rango)."));
@@ -420,7 +472,7 @@ function setupServos() {
     isConnected() ? "Perfil guardado. Pulsa «Enviar perfil al robot» para aplicarlo al ESP32." : "Perfil guardado. Se enviará al conectar el robot."));
   $("profile-reset").addEventListener("click", () => {
     renderProfileTable(DEFAULT_SERVO_PROFILE);
-    setNotice("Valores de fábrica cargados en el editor. Pulsa «Guardar perfil» para conservarlos.");
+    setNotice("Rangos calibrados cargados en el editor. Pulsa «Guardar perfil» para conservarlos.");
   });
   $("profile-send").addEventListener("click", () => {
     const holding = SERVOS.filter(held);
@@ -465,8 +517,9 @@ function setupLegs() {
 
   $("stance-save").addEventListener("click", () => act(() => saveStance(), "Postura de apoyo guardada y recuperación automática activada. Calibra de nuevo las elevaciones."));
   $("stance-measured").addEventListener("click", () => act(() => useMeasuredStandingPose(),
-    "Postura medida guardada para este robot. No se enviaron movimientos. Calibra de nuevo las elevaciones."));
+    "Postura de pie calibrada guardada y recuperación automática activada. No se enviaron movimientos."));
   $("stance-restore").addEventListener("click", () => act(() => restoreStance(), "Recuperando la postura de apoyo."));
+  $("stance-rest").addEventListener("click", () => act(() => restPose(), "Moviendo a descanso: caderas a 90° y pies a 150°."));
   $("stance-auto").addEventListener("change", (event) => act(() => setAutoStance(event.target.checked),
     event.target.checked ? "Se recuperará la postura de apoyo al conectar tras un reinicio." : "Recuperación automática desactivada."));
 
@@ -482,15 +535,23 @@ function setupLegs() {
   const liftRows = $("lift-rows");
   for (const n of LIFT_SERVOS) {
     const input = el("input", { type: "number", min: 1, max: 180, value: 10, ariaLabel: `Subida de ${n}` });
-    const confirm = el("input", { type: "checkbox" });
-    input.addEventListener("input", () => { confirm.checked = false; });
+    const confirm = el("input", { type: "checkbox", disabled: true });
     const leg = LEGS[LEG_OF[n]];
-    liftRows.append(el("div", { className: "lift-row", dataset: { servo: n } }, [
+    const row = el("div", { className: "lift-row", dataset: { servo: n } }, [
       el("strong", { textContent: `${n}` }), el("span", { className: "small-note", textContent: leg.label }),
       el("span", { className: "inline-fields" }, [input, el("span", { className: "unit", textContent: "°" })]),
-      button("Probar subir y bajar", () => runAction(`Prueba de ${n}`, () => testLift(n, Number(input.value))), { needs: "move", small: true }),
+      button("Probar subir y bajar", async () => {
+        const testedValue = Number(input.value);
+        const result = await runAction(`Prueba de ${n}`, () => testLift(n, testedValue));
+        if (result?.status === "done" && Number(input.value) === testedValue) {
+          row.dataset.tested = String(testedValue);
+          confirm.disabled = false;
+        }
+      }, { needs: "move", small: true }),
       el("label", { className: "check" }, [confirm, " Sí se despegó"])
-    ]));
+    ]);
+    input.addEventListener("input", () => { row.dataset.tested = ""; confirm.checked = false; confirm.disabled = true; });
+    liftRows.append(row);
   }
   $("lifts-save").addEventListener("click", () => {
     const lifts = {};
@@ -498,9 +559,9 @@ function setupLegs() {
     for (const row of liftRows.querySelectorAll(".lift-row")) {
       const [input, confirm] = row.querySelectorAll("input");
       lifts[row.dataset.servo] = Number(input.value);
-      if (!confirm.checked) missing.push(row.dataset.servo);
+      if (!confirm.checked || row.dataset.tested !== input.value) missing.push(row.dataset.servo);
     }
-    if (missing.length) { setNotice(`Confirma visualmente que el pie se despega en: ${missing.join(", ")}.`, true); return; }
+    if (missing.length) { setNotice(`Prueba y confirma visualmente que se despega el pie en: ${missing.join(", ")}.`, true); return; }
     act(() => saveWalkLifts(lifts), "Elevaciones guardadas para este robot.");
   });
 
@@ -541,9 +602,10 @@ function renderLegsProfile() {
   for (const row of $("lift-rows").querySelectorAll(".lift-row")) {
     const saved = p.walkLifts?.[row.dataset.servo];
     const [input, confirm] = row.querySelectorAll("input");
-    if (saved) { input.value = String(saved); confirm.checked = true; }
+    if (saved) { input.value = String(saved); row.dataset.tested = String(saved); confirm.checked = true; confirm.disabled = false; }
+    else { row.dataset.tested = ""; confirm.checked = false; confirm.disabled = true; }
   }
-  $("lifts-info").textContent = p.walkLifts ? `Guardadas: ${LIFT_SERVOS.map((n) => `${n} ${p.walkLifts[n]}°`).join(" · ")}` : "Sin elevaciones guardadas.";
+  $("lifts-info").textContent = p.walkLifts ? `Guardadas: ${LIFT_SERVOS.map((n) => `${n} ${p.walkLifts[n]}°`).join(" · ")}` : "Sin elevaciones guardadas: la caminata usa 10° de prueba por pata.";
 }
 
 function renderLegsLive() {
@@ -564,7 +626,7 @@ function renderLegsLive() {
     ["Postura de apoyo guardada", Boolean(p.stance)],
     ["Robot en la postura de apoyo", atStance()],
     ["Recorrido de avance guardado", Boolean(p.walkSwing)],
-    ["Elevaciones de las cuatro patas guardadas", Boolean(p.walkLifts)]
+    ["Elevaciones por pata personalizadas", Boolean(p.walkLifts)]
   ];
   $("walk-checks").replaceChildren(...checks.map(([label, okay]) => el("li", { className: okay ? "ok" : "pending", textContent: `${okay ? "✓" : "○"} ${label}` })));
 }
@@ -898,7 +960,7 @@ function renderRoutinesList() {
     const amplitude = scalable ? el("select", { className: "routine-scale", ariaLabel: `Amplitud de ${name}`, dataset: { needs: "move" } },
       [1, 2, 3].map((scale) => el("option", { value: String(scale), textContent: `${scale}×` }))) : null;
     const feedback = el("p", { className: "small-note routine-feedback", role: "status",
-      textContent: needsStance ? "Requiere postura de apoyo guardada, recuperada y los ocho servos sujetos («Mover patas»)." : "" });
+      textContent: needsStance ? "Se ejecuta desde la postura de pie calibrada. Si la cambiaste, pulsa «Recuperar postura guardada» en Mover patas." : "" });
     return el("div", { className: "item" }, [
       el("div", { className: "routine-details" }, [
         el("strong", { textContent: demo ? name.replaceAll("_", " ") : name }),
@@ -1102,29 +1164,63 @@ function sesameSteps(intro, cycle, cycles, stay, face) {
   return { steps, speed };
 }
 
-async function runSesame(label, face, intro, cycle, cycles, stay) {
-  const { steps, speed } = sesameSteps(intro, cycle, cycles, stay, face);
+async function runSesamePrepared(label, steps, speed) {
   return runSteps(`sesame_${label}`, steps, 1, {
     // Velocidad temporal de la coreografía; al terminar o detenerse vuelve la del perfil.
     before: async (check) => {
       for (const n of SERVOS) {
         check();
+        if (Math.abs(firmwareSpeed(n) - speed) < 0.1) continue;
         await actSpeed(n, speed, "sesame", false);
         await sleep(BURST_GAP_MS);
       }
     },
-    after: () => applySpeeds("sesame")
+    after: async () => {
+      for (const n of SERVOS) {
+        if (Math.abs(firmwareSpeed(n) - cfg(n).speed) < 0.1) continue;
+        await actSpeed(n, cfg(n).speed, "sesame", false);
+        await sleep(BURST_GAP_MS);
+      }
+    }
   });
+}
+
+async function runSesame(label, face, intro, cycle, cycles, stay) {
+  const { steps, speed } = sesameSteps(intro, cycle, cycles, stay, face);
+  return runSesamePrepared(label, steps, speed);
+}
+
+async function runSesameLinearGait(gait, cycles) {
+  const amplitude = num("sesame-amplitude") / 100;
+  const tempo = num("sesame-tempo") / 100;
+  const speed = num("sesame-speed");
+  const stride = Math.max(1, Math.round(16 * amplitude)); // 75 % = los 12° probados en Mover patas.
+  const direction = gait.id === "forward" ? 1 : -1;
+  const cycle = buildWalkSteps(stride, 10, direction).map((step) => ({ ...step, _settleMs: Math.round(step._settleMs / tempo) }));
+  const steps = Array.from({ length: cycles }, () => cycle).flat();
+  if (robot.faces[gait.face]) steps.unshift({ face: gait.face });
+  if (robot.faces.normal) steps.push({ face: "normal" });
+  return runSesamePrepared(gait.id, steps, speed);
 }
 
 // Una sola ruta de envío para la pestaña Sesame y para Demostración → Coreografías.
 // feedback: nodo opcional donde mostrar el progreso/error junto al botón pulsado.
 async function playSesameMove(move, feedback) {
+  if (move.id === "rest") {
+    return playSesame(move.label, () => {
+      requireAllReady("descansar");
+      if (!validPose(MEASURED_REST_POSE)) fail("La postura de descanso no cabe en los rangos actuales.");
+      return runSteps("sesame_rest", [{ face: "dormido", pose_all: SERVOS.map((n) => MEASURED_REST_POSE[n]), wait_done: true }]);
+    }, feedback);
+  }
   return playSesame(move.label, () => runSesame(move.id, move.face, move.frames, [], 0, move.stay), feedback);
 }
 async function playSesameGait(gait, feedback) {
   const cycles = clamp(Math.round(num("sesame-cycles")) || 1, 1, 20);
-  return playSesame(gait.label, () => runSesame(gait.id, gait.face, gait.intro, gait.cycle, cycles, false), feedback);
+  const run = ["forward", "backward"].includes(gait.id)
+    ? () => runSesameLinearGait(gait, cycles)
+    : () => runSesame(gait.id, gait.face, gait.intro, gait.cycle, cycles, false);
+  return playSesame(gait.label, run, feedback);
 }
 async function playSesame(label, fn, feedback) {
   if (feedback) { feedback.textContent = `Enviando «${label}»…`; feedback.classList.remove("error-text"); }
@@ -1205,7 +1301,7 @@ function renderProfileDependent() {
   $("sesame-stance").textContent = robot.profile.stance
     ? `Postura de apoyo: ${poseText(robot.profile.stance)}` : "Guarda la postura de apoyo en «Mover patas» antes de usar Sesame.";
   $("demo-choreo-stance").textContent = robot.profile.stance
-    ? "Postura de apoyo guardada. Sujeta los ocho servos (arriba) y elige una coreografía."
+    ? "Postura de apoyo calibrada. Al conectar se sujetan los ocho servos; elige una coreografía."
     : "Falta la postura de apoyo: guárdala en «Mover patas» antes de ejecutar coreografías.";
 }
 
